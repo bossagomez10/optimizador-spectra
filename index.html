@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Optimizador de Rollos</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #181818;
+      --surface2: #222222;
+      --border: #2e2e2e;
+      --accent: #c8f060;
+      --accent2: #60d0f0;
+      --accent3: #f06090;
+      --text: #f0f0f0;
+      --muted: #888;
+      --win: #c8f060;
+      --lose: #f06090;
+      --tie: #60d0f0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding: 28px 40px 24px;
+      display: flex;
+      align-items: flex-end;
+      gap: 20px;
+    }
+
+    .header h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .header p {
+      color: var(--muted);
+      font-size: 12px;
+      padding-bottom: 3px;
+    }
+
+    .wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 32px 40px;
+      display: grid;
+      gap: 24px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 24px;
+    }
+
+    .card-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .grid-rolls { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.08em;
+    }
+
+    input, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 12px;
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      border-radius: 3px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus, select:focus { border-color: var(--accent); }
+
+    select option { background: var(--surface); }
+
+    .btn {
+      cursor: pointer;
+      border: none;
+      border-radius: 3px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      padding: 11px 18px;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0f0f0f;
+    }
+    .btn-primary:hover { background: #d8ff70; transform: translateY(-1px); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      font-size: 11px;
+    }
+    .btn-danger:hover { border-color: var(--accent3); color: var(--accent3); }
+
+    .btn-run {
+      background: var(--accent);
+      color: #0f0f0f;
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 15px;
+      letter-spacing: 0.05em;
+      padding: 16px 40px;
+      width: 100%;
+      cursor: pointer;
+      border: none;
+      border-radius: 3px;
+      transition: all 0.15s;
+    }
+    .btn-run:hover { background: #d8ff70; transform: translateY(-1px); }
+
+    .row-entry {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: end;
+    }
+
+    .cuts-row { grid-template-columns: 1fr 1fr 1fr auto; }
+    .price-row-entry { grid-template-columns: 2fr 1fr 1fr auto; }
+    .roll-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .roll-row input { max-width: 140px; }
+
+    .btn-group { display: flex; gap: 10px; margin-top: 14px; }
+
+    /* Results */
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      margin-top: 4px;
+    }
+
+    .result-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 18px;
+      position: relative;
+      transition: border-color 0.2s;
+    }
+
+    .result-card.winner { border-color: var(--win); }
+    .result-card.loser { border-color: var(--border); opacity: 0.7; }
+    .result-card.tied { border-color: var(--tie); }
+
+    .result-card .roll-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .result-card .big-num {
+      font-family: 'Syne', sans-serif;
+      font-size: 2.4rem;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+
+    .result-card.winner .big-num { color: var(--win); }
+    .result-card.tied .big-num { color: var(--tie); }
+
+    .result-card .unit { font-size: 11px; color: var(--muted); }
+
+    .badge {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      font-family: 'Syne', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      padding: 3px 8px;
+      border-radius: 2px;
+      text-transform: uppercase;
+    }
+
+    .badge-win { background: var(--win); color: #0f0f0f; }
+    .badge-tie { background: var(--tie); color: #0f0f0f; }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .stat {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 14px;
+    }
+
+    .stat .stat-label { font-size: 10px; color: var(--muted); letter-spacing: 0.08em; margin-bottom: 6px; }
+    .stat .stat-val { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; }
+
+    /* Efficiency bar */
+    .eff-bar-wrap { margin-top: 8px; }
+    .eff-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+    .eff-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .eff-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.6s ease; }
+
+    /* Warnings */
+    .warning-box {
+      background: rgba(240,96,144,0.1);
+      border: 1px solid var(--accent3);
+      border-radius: 3px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: var(--accent3);
+      margin-bottom: 14px;
+    }
+
+    /* Table */
+    .tbl-wrap { overflow-x: auto; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+      background: var(--bg);
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-weight: 400;
+    }
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+    .td-best { color: var(--win); font-weight: 500; }
+    .td-worst { color: var(--muted); }
+
+    /* Canvas */
+    .canvas-section { margin-top: 20px; }
+    .canvas-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .canvas-label .cl-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 2px;
+      background: var(--surface2);
+      color: var(--accent);
+    }
+    .canvas-label .cl-badge.best { background: var(--accent); color: #0f0f0f; }
+
+    .canvas-wrap {
+      overflow-x: auto;
+      background: #0a0a0a;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    canvas { display: block; }
+
+    .placeholder {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 20px 0;
+      text-align: center;
+    }
+
+    .section-tabs {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Cuts area table */
+    .cuts-area-table { margin-top: 16px; }
+    .cuts-area-table table td:first-child { color: var(--muted); }
+
+
+    /* Quoter */
+    .quoter-controls {
+      display: flex;
+      gap: 14px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .quoter-controls > div { min-width: 200px; flex: 1; }
+    .quoter-result-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .q-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 16px;
+    }
+    .q-card .q-ref { font-size: 11px; color: var(--muted); margin-bottom: 10px; letter-spacing: 0.08em; }
+    .q-card .q-roll { font-size: 10px; color: var(--muted); margin-top: 10px; margin-bottom: 3px; }
+    .q-card .q-total {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--accent);
+    }
+    .q-card .q-breakdown { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .q-card.q-best { border-color: var(--accent); }
+
+    @media (max-width: 900px) {
+      .header { padding: 20px; flex-direction: column; align-items: flex-start; gap: 8px; }
+      .wrap { padding: 20px; }
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      .cuts-row, .price-row-entry { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Optimizador de Rollos</h1>
+  </div>
+  <p>Compara N anchos de rollo · Best Fit · Rotación inteligente · Métricas de desperdicio</p>
+</div>
+
+<div class="wrap">
+
+  <!-- CONFIG -->
+  <div class="card">
+    <div class="card-title">Configuración general</div>
+    <div class="grid-3">
+      <div>
+        <label>Merma ancho (m)</label>
+        <input id="garbageW" type="number" step="0.01" value="0.02" />
+      </div>
+      <div>
+        <label>Merma alto (m) — aplicada por fila</label>
+        <input id="garbageH" type="number" step="0.01" value="0.04" />
+      </div>
+      <div>
+        <label>Permitir rotación</label>
+        <select id="acceptsRotation">
+          <option value="true" selected>Sí</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+
+    <!-- ROLLOS -->
+    <div class="card" style="display:none">
+      <div class="card-title">Anchos de rollo a comparar</div>
+      <div id="rolls"></div>
+      <div class="btn-group">
+        <button class="btn btn-ghost" id="addRoll">+ Agregar ancho</button>
+      </div>
+    </div>
+
+    <!-- CORTES -->
+    <div class="card">
+      <div class="card-title">Cortes</div>
+      <div id="cuts"></div>
+      <div class="btn-group">
+        <button class="btn btn-ghost" id="addCut">+ Agregar corte</button>
+        <button class="btn btn-ghost" id="loadExample">Cargar ejemplo</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TARIFAS -->
+  <div class="card" style="display:none">
+    <div class="card-title">Tarifas (opcional)</div>
+    <div id="prices"></div>
+    <div class="btn-group">
+      <button class="btn btn-ghost" id="addPrice">+ Agregar tarifa</button>
+    </div>
+  </div>
+
+  <!-- RUN -->
+  <div>
+    <button class="btn-run" id="optimizeBtn">▶ Comparar todos los anchos</button>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="card" id="resultsCard">
+    <div class="card-title">Resultado comparativo</div>
+    <div id="result"><p class="placeholder">Aún no calculado — presiona Comparar.</p></div>
+  </div>
+
+  <!-- AREA DE CORTES -->
+  <div class="card" id="areaCard">
+    <div class="card-title">Área de cortes</div>
+    <div id="cutsArea"><p class="placeholder">Aún no calculado.</p></div>
+  </div>
+
+  <!-- COSTOS -->
+  <div class="card" id="costCard">
+    <div class="card-title">Costos comparativos por tarifa</div>
+    <div id="costTable"><p class="placeholder">Aún no calculado.</p></div>
+  </div>
+
+
+  <!-- COTIZADOR -->
+  <div class="card" id="quoterCard">
+    <div class="card-title">Cotizador rápido</div>
+    <div id="quoterBody"><p class="placeholder">Calcula primero para habilitar el cotizador.</p></div>
+  </div>
+
+  <!-- VISUAL -->
+  <div class="card">
+    <div class="card-title">Distribución visual por rollo</div>
+    <div id="canvases"><p class="placeholder">Aún no calculado.</p></div>
+  </div>
+
+</div>
+
+<script>
+// ─── UTIL ───────────────────────────────────────────────────────────────────
+
+function fmt(n, d = 2) { return Number(n).toFixed(d); }
+
+function fmtMoney(v) {
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency", currency: "COP", maximumFractionDigits: 0
+  }).format(v || 0);
+}
+
+// ─── EXPAND PIECES ──────────────────────────────────────────────────────────
+// Merma de ancho por pieza; merma de alto se aplica una vez por FILA (ver algoritmo)
+
+function expandPieces(pieces, garbageW) {
+  const expanded = [];
+  for (const p of pieces) {
+    for (let i = 0; i < p.amount; i++) {
+      expanded.push({
+        width: p.width + garbageW,
+        height: p.height,           // alto sin merma individual; se aplica por fila
+        originalWidth: p.width,
+        originalHeight: p.height,
+        rotated: false,
+      });
+    }
+  }
+  return expanded;
+}
+
+// ─── BEST FIT DECREASING SHELF ──────────────────────────────────────────────
+
+function bestFitShelves({ rollWidth, pieces, acceptsRotation, garbageW, garbageH }) {
+  const expanded = expandPieces(pieces, garbageW);
+
+  // Intentar múltiples órdenes y quedarse con la mejor
+  const orders = [
+    [...expanded].sort((a, b) => b.height - a.height || b.width - a.width),
+    [...expanded].sort((a, b) => b.width - a.width  || b.height - a.height),
+    [...expanded].sort((a, b) => (b.width * b.height) - (a.width * a.height)),
+  ];
+
+  let best = null;
+  const warnings = [];
+
+  for (const sorted of orders) {
+    const result = runShelfPack(sorted, rollWidth, acceptsRotation, garbageH, warnings);
+    if (!best || result.linearMeters < best.linearMeters) {
+      best = result;
+    }
+  }
+
+  return { ...best, expanded, warnings };
+}
+
+function runShelfPack(sorted, rollWidth, acceptsRotation, garbageH, warnings) {
+  const shelves = [];
+  let currentShelf = null;
+  const skipped = [];
+
+  for (const originalPiece of sorted) {
+    // Determinar mejor orientación para la pieza (probar siempre ambas)
+    let piece = chooseBestOrientation(originalPiece, currentShelf ? rollWidth - currentShelf.usedWidth : rollWidth, rollWidth, acceptsRotation);
+
+    if (!piece) {
+      // No cabe de ninguna forma en el rollo completo
+      const msg = `Pieza ${originalPiece.originalWidth}×${originalPiece.originalHeight} no cabe en rollo de ${rollWidth} m — omitida.`;
+      if (!warnings.includes(msg)) warnings.push(msg);
+      skipped.push(originalPiece);
+      continue;
+    }
+
+    // Best Fit: buscar la fila donde quede MENOS espacio sobrante tras colocar la pieza
+    let bestShelfIdx = -1;
+    let bestLeftover = Infinity;
+
+    for (let i = 0; i < shelves.length; i++) {
+      const shelf = shelves[i];
+      const remaining = rollWidth - shelf.usedWidth;
+
+      // Probar orientación normal
+      if (originalPiece.width <= remaining) {
+        const leftover = remaining - originalPiece.width;
+        if (leftover < bestLeftover) { bestLeftover = leftover; bestShelfIdx = i; }
+      }
+      // Probar rotada
+      if (acceptsRotation && originalPiece.height <= remaining && originalPiece.width <= rollWidth) {
+        const leftover = remaining - originalPiece.height;
+        if (leftover < bestLeftover) { bestLeftover = leftover; bestShelfIdx = i; }
+      }
+    }
+
+    if (bestShelfIdx >= 0) {
+      const shelf = shelves[bestShelfIdx];
+      const remaining = rollWidth - shelf.usedWidth;
+      // Re-decidir orientación para esta fila específica
+      let chosen = tryOrient(originalPiece, remaining, rollWidth, acceptsRotation);
+      if (!chosen) chosen = piece;
+      shelf.items.push(chosen);
+      shelf.usedWidth += chosen.width;
+      shelf.rawHeight = Math.max(shelf.rawHeight, chosen.height);
+    } else {
+      // Nueva fila
+      let chosen = piece;
+      if (chosen.width > rollWidth) {
+        // intenta rotar
+        if (acceptsRotation && chosen.height <= rollWidth) {
+          chosen = rotate(chosen);
+        } else {
+          continue; // ya en warnings
+        }
+      }
+      currentShelf = {
+        usedWidth: chosen.width,
+        rawHeight: chosen.height,  // sin merma de alto todavía
+        items: [chosen],
+      };
+      shelves.push(currentShelf);
+    }
+  }
+
+  // Aplicar merma de alto UNA VEZ por fila
+  shelves.forEach(s => { s.height = s.rawHeight + garbageH; });
+  const linearMeters = shelves.reduce((sum, s) => sum + s.height, 0);
+
+  return { linearMeters, shelves, skipped };
+}
+
+function rotate(piece) {
+  return { ...piece, width: piece.height, height: piece.width, rotated: !piece.rotated };
+}
+
+function tryOrient(piece, remainingWidth, rollWidth, acceptsRotation) {
+  if (piece.width <= remainingWidth) return piece;
+  if (acceptsRotation && piece.height <= remainingWidth && piece.width <= rollWidth) return rotate(piece);
+  return null;
+}
+
+function chooseBestOrientation(piece, remainingWidth, rollWidth, acceptsRotation) {
+  const normalOk = piece.width <= rollWidth;
+  const rotatedOk = acceptsRotation && piece.height <= rollWidth && piece.width <= rollWidth;
+
+  if (!normalOk && !rotatedOk) return null;
+
+  // Si ambas caben en la fila actual, elegir la que deje menos espacio sobrante
+  const normalFits = piece.width <= remainingWidth;
+  const rotatedFits = acceptsRotation && piece.height <= remainingWidth;
+
+  if (normalFits && rotatedFits) {
+    const leftoverNormal = remainingWidth - piece.width;
+    const leftoverRotated = remainingWidth - piece.height;
+    return leftoverNormal <= leftoverRotated ? piece : rotate(piece);
+  }
+  if (normalFits) return piece;
+  if (rotatedFits) return rotate(piece);
+  if (normalOk) return piece;
+  if (rotatedOk) return rotate(piece);
+  return null;
+}
+
+// ─── AREAS ──────────────────────────────────────────────────────────────────
+
+function originalArea(pieces) {
+  return pieces.reduce((s, p) => s + p.width * p.height * p.amount, 0);
+}
+
+function workAreaFromShelves(shelves, rollWidth) {
+  return shelves.reduce((s, sh) => s + sh.height * rollWidth, 0);
+}
+
+function pieceWorkArea(expanded) {
+  return expanded.reduce((s, p) => s + p.width * p.height, 0);
+}
+
+// ─── FORM HELPERS ───────────────────────────────────────────────────────────
+
+function addRollRow(val = "") {
+  const row = document.createElement("div");
+  row.className = "roll-row";
+  row.innerHTML = `
+    <input type="number" step="0.01" class="roll-width" placeholder="Ancho (m)" value="${val}" style="max-width:160px">
+    <button type="button" class="btn btn-danger remove-roll">Eliminar</button>
+  `;
+  row.querySelector(".remove-roll").addEventListener("click", () => row.remove());
+  document.getElementById("rolls").appendChild(row);
+}
+
+function addCutRow(w = "", h = "", a = 1) {
+  const row = document.createElement("div");
+  row.className = "row-entry cuts-row";
+  row.innerHTML = `
+    <div><label>Ancho (m)</label><input type="number" step="0.01" class="cut-width" value="${w}" placeholder="0.00"></div>
+    <div><label>Alto (m)</label><input type="number" step="0.01" class="cut-height" value="${h}" placeholder="0.00"></div>
+    <div><label>Cantidad</label><input type="number" step="1" class="cut-amount" value="${a}" placeholder="1"></div>
+    <div style="padding-top:22px"><button type="button" class="btn btn-danger remove-cut">✕</button></div>
+  `;
+  row.querySelector(".remove-cut").addEventListener("click", () => row.remove());
+  document.getElementById("cuts").appendChild(row);
+}
+
+function addPriceRow(name = "", pl = "", pm = "") {
+  const row = document.createElement("div");
+  row.className = "row-entry price-row-entry";
+  row.innerHTML = `
+    <div><label>Nombre</label><input type="text" class="price-name" value="${name}" placeholder="Línea..."></div>
+    <div><label>Precio / m lineal</label><input type="number" step="1" class="price-linear" value="${pl}" placeholder="0"></div>
+    <div><label>Precio / m²</label><input type="number" step="1" class="price-m2" value="${pm}" placeholder="0"></div>
+    <div style="padding-top:22px"><button type="button" class="btn btn-danger remove-price">✕</button></div>
+  `;
+  row.querySelector(".remove-price").addEventListener("click", () => row.remove());
+  document.getElementById("prices").appendChild(row);
+}
+
+function getRolls() {
+  return [...document.querySelectorAll(".roll-width")]
+    .map(i => parseFloat(i.value))
+    .filter(v => v > 0);
+}
+
+function getPieces() {
+  return [...document.querySelectorAll("#cuts .row-entry")].map(row => ({
+    width: parseFloat(row.querySelector(".cut-width").value) || 0,
+    height: parseFloat(row.querySelector(".cut-height").value) || 0,
+    amount: parseInt(row.querySelector(".cut-amount").value, 10) || 0,
+  })).filter(p => p.width > 0 && p.height > 0 && p.amount > 0);
+}
+
+function getPrices() {
+  return [...document.querySelectorAll("#prices .row-entry")].map(row => ({
+    name: row.querySelector(".price-name").value.trim(),
+    priceLinear: parseFloat(row.querySelector(".price-linear").value) || 0,
+    priceM2: parseFloat(row.querySelector(".price-m2").value) || 0,
+  })).filter(p => p.name || p.priceLinear || p.priceM2);
+}
+
+// ─── DRAW CANVAS ────────────────────────────────────────────────────────────
+
+const PALETTE = [
+  "#c8f060","#60d0f0","#f06090","#f0c060","#a0f0c0","#c090f0",
+  "#f09060","#60f0d0","#f060c8","#90c0f0","#f0f060","#90f090",
+];
+
+function drawCanvas(result, rollWidth, canvas) {
+  const ctx = canvas.getContext("2d");
+  const totalH = result.shelves.reduce((s, sh) => s + sh.height, 0);
+  if (totalH === 0) return;
+
+  const maxW = 820;
+  const scale = Math.min(maxW / rollWidth, 260 / Math.max(totalH, 0.5));
+  const pad = 10;
+  const labelW = 130;
+
+  canvas.width = Math.max(600, rollWidth * scale + pad * 2 + labelW);
+  canvas.height = Math.max(200, totalH * scale + pad * 2 + 30);
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Roll outline
+  ctx.strokeStyle = "#444";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad, pad, rollWidth * scale, totalH * scale);
+
+  // Waste background
+  ctx.fillStyle = "rgba(255,255,255,0.03)";
+  ctx.fillRect(pad, pad, rollWidth * scale, totalH * scale);
+
+  let cy = 0;
+  let colorIdx = 0;
+
+  result.shelves.forEach((shelf, si) => {
+    let cx = 0;
+    const shH = shelf.height * scale;
+    const rawH = shelf.rawHeight * scale;
+
+    // Merma de alto (zona inferior de la fila)
+    ctx.fillStyle = "rgba(240,96,144,0.12)";
+    ctx.fillRect(pad, pad + cy * scale + rawH, rollWidth * scale, shH - rawH);
+
+    shelf.items.forEach(item => {
+      const x = pad + cx * scale;
+      const y = pad + cy * scale;
+      const w = item.width * scale;
+      const h = item.height * scale;
+
+      const col = PALETTE[colorIdx % PALETTE.length];
+      ctx.fillStyle = col + "33";
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, w, h);
+
+      // Dimensions: show original size centered inside the piece
+      if (w > 28 && h > 20) {
+        const lineW = `${item.originalWidth.toFixed(2)} m`;
+        const lineH = `${item.originalHeight.toFixed(2)} m`;
+        const fontSize = Math.max(8, Math.min(11, w / 7));
+        ctx.font = `bold ${fontSize}px DM Mono, monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // Semi-transparent pill background
+        const textW = Math.max(
+          ctx.measureText(lineW).width,
+          ctx.measureText(lineH).width
+        ) + 10;
+        const textH = fontSize * 2 + 10;
+        const tx = x + w / 2;
+        const ty = y + h / 2;
+
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.beginPath();
+        ctx.roundRect(tx - textW / 2, ty - textH / 2, textW, textH, 3);
+        ctx.fill();
+
+        ctx.fillStyle = col;
+        ctx.fillText(lineW, tx, ty - fontSize / 2 - 1);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(lineH, tx, ty + fontSize / 2 + 1);
+
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      }
+
+      cx += item.width;
+      colorIdx++;
+    });
+
+    // Waste at end of row
+    const usedW = shelf.usedWidth * scale;
+    if (rollWidth * scale - usedW > 2) {
+      ctx.fillStyle = "rgba(255,255,255,0.04)";
+      ctx.fillRect(pad + usedW, pad + cy * scale, rollWidth * scale - usedW, rawH);
+    }
+
+    // Row label
+    ctx.fillStyle = "#666";
+    ctx.font = "10px DM Mono, monospace";
+    ctx.fillText(`F${si + 1}  h=${shelf.height.toFixed(2)}m`, pad + rollWidth * scale + 8, pad + cy * scale + 14);
+
+    cy += shelf.height;
+  });
+
+  // Total line
+  ctx.strokeStyle = "#c8f060";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(pad, pad + totalH * scale);
+  ctx.lineTo(pad + rollWidth * scale, pad + totalH * scale);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "#c8f060";
+  ctx.font = "bold 11px Syne, sans-serif";
+  ctx.fillText(`${totalH.toFixed(2)} m lineales`, pad + 4, pad + totalH * scale - 5);
+}
+
+
+// ─── QUOTER ─────────────────────────────────────────────────────────────────
+
+let _lastResults = null;
+let _lastPieces  = null;
+
+function renderQuoter(allResults, pieces) {
+  _lastResults = allResults;
+  _lastPieces  = pieces;
+
+  const prices = getPrices();
+  const container = document.getElementById("quoterBody");
+
+  if (!prices.length) {
+    container.innerHTML = `<p class="placeholder">Agrega tarifas en la sección de tarifas para usar el cotizador.</p>`;
+    return;
+  }
+
+  const origArea = originalArea(pieces);
+
+  // Build selector options
+  const options = prices.map((p, i) => `<option value="${i}">${p.name || 'Tarifa ' + (i+1)}</option>`).join('');
+
+  container.innerHTML = `
+    <div class="quoter-controls">
+      <div>
+        <label>Referencia / material</label>
+        <select id="quoterRef">${options}</select>
+      </div>
+      <div>
+        <label>Tipo de precio base</label>
+        <select id="quoterType">
+          <option value="linear">Por metro lineal</option>
+          <option value="m2work">Por m² (área de trabajo)</option>
+          <option value="m2orig">Por m² (área original de cortes)</option>
+        </select>
+      </div>
+    </div>
+    <div id="quoterCards" class="quoter-result-grid"></div>
+  `;
+
+  function updateQuoter() {
+    const refIdx  = parseInt(document.getElementById("quoterRef").value);
+    const type    = document.getElementById("quoterType").value;
+    const ref     = prices[refIdx];
+    const cardsEl = document.getElementById("quoterCards");
+
+    const totals = allResults.map(r => {
+      const wArea = workAreaFromShelves(r.shelves, r.rollWidth);
+      let total = 0;
+      if (type === "linear")  total = ref.priceLinear * r.linearMeters;
+      if (type === "m2work")  total = ref.priceM2 * wArea;
+      if (type === "m2orig")  total = ref.priceM2 * origArea;
+      return { r, total, wArea };
+    });
+
+    const minTotal = Math.min(...totals.map(t => t.total));
+
+    cardsEl.innerHTML = totals.map(({ r, total, wArea }) => {
+      const isBest = total === minTotal;
+      const linVal = ref.priceLinear * r.linearMeters;
+      const m2wVal = ref.priceM2 * wArea;
+      const m2oVal = ref.priceM2 * origArea;
+
+      return `
+        <div class="q-card ${isBest ? 'q-best' : ''}">
+          <div class="q-ref">${ref.name || '—'} · Rollo ${r.rollWidth} m ${isBest ? '★' : ''}</div>
+          <div class="q-total">${fmtMoney(total)}</div>
+          <div class="q-breakdown">
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+              <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                <span>Por metro lineal</span><span style="color:var(--text)">${fmtMoney(linVal)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                <span>Por m² trabajo (${fmt(wArea)} m²)</span><span style="color:var(--text)">${fmtMoney(m2wVal)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span>Por m² original (${fmt(origArea)} m²)</span><span style="color:var(--text)">${fmtMoney(m2oVal)}</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  document.getElementById("quoterRef").addEventListener("change", updateQuoter);
+  document.getElementById("quoterType").addEventListener("change", updateQuoter);
+  updateQuoter();
+}
+
+// ─── RENDER RESULTS ─────────────────────────────────────────────────────────
+
+function renderResults(allResults, pieces, prices, garbageW, garbageH) {
+  const origArea = originalArea(pieces);
+  const minLM = Math.min(...allResults.map(r => r.linearMeters));
+
+  // ── Result cards ──
+  let html = `<div class="results-grid">`;
+  allResults.forEach(r => {
+    const isWinner = r.linearMeters === minLM;
+    const isTied = allResults.filter(x => x.linearMeters === minLM).length > 1;
+    const cls = isTied ? "tied" : isWinner ? "winner" : "loser";
+    const badge = isTied ? `<span class="badge badge-tie">Empate</span>` : isWinner ? `<span class="badge badge-win">Mejor</span>` : "";
+    const wArea = workAreaFromShelves(r.shelves, r.rollWidth);
+    const eff = origArea > 0 ? Math.min(100, (origArea / wArea) * 100) : 0;
+    const waste = wArea - origArea;
+
+    html += `
+      <div class="result-card ${cls}">
+        ${badge}
+        <div class="roll-label">Rollo ${r.rollWidth} m</div>
+        <div class="big-num">${fmt(r.linearMeters)}</div>
+        <div class="unit">metros lineales</div>
+        <div class="eff-bar-wrap" style="margin-top:14px">
+          <div class="eff-label"><span>Aprovechamiento</span><span>${fmt(eff, 1)}%</span></div>
+          <div class="eff-bar"><div class="eff-fill" style="width:${eff}%"></div></div>
+        </div>
+        <div style="margin-top:12px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:3px">Área usada</div>
+          <div style="font-size:13px">${fmt(wArea)} m²</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;margin-bottom:3px">Desperdicio</div>
+          <div style="font-size:13px;color:var(--accent3)">${fmt(waste)} m²</div>
+        </div>
+      </div>`;
+  });
+  html += `</div>`;
+
+  // Diferencias
+  if (allResults.length >= 2) {
+    const sorted = [...allResults].sort((a, b) => a.linearMeters - b.linearMeters);
+    html += `<div class="stats-row">`;
+    for (let i = 1; i < sorted.length; i++) {
+      const diff = sorted[i].linearMeters - sorted[0].linearMeters;
+      html += `
+        <div class="stat">
+          <div class="stat-label">Diferencia ${sorted[0].rollWidth}m vs ${sorted[i].rollWidth}m</div>
+          <div class="stat-val" style="color:var(--accent)">${fmt(diff)} m</div>
+        </div>`;
+    }
+    html += `<div class="stat">
+      <div class="stat-label">Área original total</div>
+      <div class="stat-val">${fmt(origArea)} m²</div>
+    </div>`;
+    html += `</div>`;
+  }
+
+  // Warnings
+  const allWarnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
+  if (allWarnings.length) {
+    html += allWarnings.map(w => `<div class="warning-box">⚠ ${w}</div>`).join("");
+  }
+
+  document.getElementById("result").innerHTML = html;
+
+  // ── Área de cortes ──
+  renderCutsArea(pieces, origArea);
+
+  // ── Costos ──
+  renderCosts(allResults, prices, origArea, minLM);
+
+  // ── Canvas ──
+  renderCanvases(allResults, minLM);
+
+  // ── Quoter ──
+  renderQuoter(allResults, pieces);
+}
+
+function renderCutsArea(pieces, origArea) {
+  let html = `
+    <div class="tbl-wrap cuts-area-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Pieza (ancho × alto)</th>
+            <th>Cantidad</th>
+            <th>Área unit. (m²)</th>
+            <th>Área total (m²)</th>
+            <th>% del total</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  pieces.forEach(p => {
+    const unit = p.width * p.height;
+    const total = unit * p.amount;
+    const pct = origArea > 0 ? (total / origArea * 100) : 0;
+    html += `<tr>
+      <td>${fmt(p.width)} × ${fmt(p.height)}</td>
+      <td>${p.amount}</td>
+      <td>${fmt(unit)} m²</td>
+      <td>${fmt(total)} m²</td>
+      <td>${fmt(pct, 1)}%</td>
+    </tr>`;
+  });
+  html += `
+        <tr style="background:var(--surface2)">
+          <td colspan="2" style="color:var(--accent);font-family:Syne,sans-serif;font-weight:700">TOTAL</td>
+          <td>—</td>
+          <td style="color:var(--accent);font-family:Syne,sans-serif;font-weight:700">${fmt(origArea)} m²</td>
+          <td>100%</td>
+        </tr>
+      </tbody></table>
+    </div>`;
+  document.getElementById("cutsArea").innerHTML = html;
+}
+
+function renderCosts(allResults, prices, origArea, minLM) {
+  if (!prices.length) {
+    document.getElementById("costTable").innerHTML = `<p class="placeholder">No ingresaste tarifas.</p>`;
+    return;
+  }
+
+  let html = `<div class="tbl-wrap"><table><thead><tr><th>Tarifa</th>`;
+  allResults.forEach(r => { html += `<th>Rollo ${r.rollWidth} m (lin.)</th>`; });
+  allResults.forEach(r => { html += `<th>Rollo ${r.rollWidth} m (m²)</th>`; });
+  html += `</tr></thead><tbody>`;
+
+  prices.forEach(line => {
+    const linTotals = allResults.map(r => line.priceLinear * r.linearMeters);
+    const m2Totals  = allResults.map(r => line.priceM2 * workAreaFromShelves(r.shelves, r.rollWidth));
+    const minLin = Math.min(...linTotals);
+    const minM2  = Math.min(...m2Totals);
+
+    html += `<tr><td>${line.name || "—"}</td>`;
+    linTotals.forEach(v => {
+      html += `<td class="${v === minLin ? 'td-best' : 'td-worst'}">${fmtMoney(v)}</td>`;
+    });
+    m2Totals.forEach(v => {
+      html += `<td class="${v === minM2 ? 'td-best' : 'td-worst'}">${fmtMoney(v)}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  document.getElementById("costTable").innerHTML = html;
+}
+
+function renderCanvases(allResults, minLM) {
+  const container = document.getElementById("canvases");
+  container.innerHTML = "";
+
+  allResults.forEach(r => {
+    const isWinner = r.linearMeters === minLM;
+    const wrap = document.createElement("div");
+    wrap.className = "canvas-section";
+    wrap.innerHTML = `
+      <div class="canvas-label">
+        Rollo ${r.rollWidth} m — ${fmt(r.linearMeters)} m lin.
+        <span class="cl-badge ${isWinner ? 'best' : ''}">${isWinner ? '★ MEJOR' : fmt(r.linearMeters - minLM) + ' m extra'}</span>
+      </div>
+      <div class="canvas-wrap"><canvas id="cv_${r.rollWidth.toString().replace('.','_')}"></canvas></div>
+    `;
+    container.appendChild(wrap);
+
+    const canvas = wrap.querySelector("canvas");
+    drawCanvas(r, r.rollWidth, canvas);
+  });
+}
+
+// ─── MAIN ────────────────────────────────────────────────────────────────────
+
+document.getElementById("optimizeBtn").addEventListener("click", () => {
+  try {
+    const garbageW = parseFloat(document.getElementById("garbageW").value) || 0;
+    const garbageH = parseFloat(document.getElementById("garbageH").value) || 0;
+    const acceptsRotation = document.getElementById("acceptsRotation").value === "true";
+    const rolls  = getRolls();
+    const pieces = getPieces();
+    const prices = getPrices();
+
+    if (!rolls.length)  throw new Error("Agrega al menos un ancho de rollo.");
+    if (!pieces.length) throw new Error("Agrega al menos un corte válido.");
+
+    const allResults = rolls.map(rw => {
+      const res = bestFitShelves({ rollWidth: rw, pieces, acceptsRotation, garbageW, garbageH });
+      return { ...res, rollWidth: rw };
+    });
+
+    renderResults(allResults, pieces, prices, garbageW, garbageH);
+
+  } catch (err) {
+    document.getElementById("result").innerHTML = `<div class="warning-box">⚠ ${err.message}</div>`;
+  }
+});
+
+document.getElementById("addRoll").addEventListener("click",  () => addRollRow());
+document.getElementById("addCut").addEventListener("click",   () => addCutRow());
+document.getElementById("addPrice").addEventListener("click", () => addPriceRow());
+
+document.getElementById("loadExample").addEventListener("click", () => {
+  document.getElementById("cuts").innerHTML = "";
+  document.getElementById("prices").innerHTML = "";
+  document.getElementById("rolls").innerHTML = "";
+  addRollRow(1.52); addRollRow(1.82);
+  addCutRow(1.2, 2.3, 2);
+  addCutRow(0.25, 1.8, 4);
+  addPriceRow("Metalizada", 95000, 62000);
+  addPriceRow("Cerámica", 135000, 89000);
+});
+
+// Default load
+addRollRow(1.52); addRollRow(1.82);
+addCutRow(1.2, 2.3, 2);
+addCutRow(0.25, 1.8, 4);
+addPriceRow("Metalizada", 95000, 62000);
+addPriceRow("Cerámica", 135000, 89000);
+</script>
+
+<script>
+  // Auto-height reporting for Softr iframe embedding
+  function _reportHeight() {
+    var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    window.parent.postMessage({ type: "spectra-height", height: h + 40 }, "*");
+  }
+  window.addEventListener("load", _reportHeight);
+  window.addEventListener("resize", _reportHeight);
+  new MutationObserver(_reportHeight).observe(document.body, { subtree: true, childList: true, characterData: true });
+</script>
+</body>
+</html>
