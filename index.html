@@ -501,30 +501,30 @@
 
   <!-- RUN -->
   <div>
-    <button class="btn-run" id="optimizeBtn">▶ Comparar todos los anchos</button>
+    <button class="btn-run" id="optimizeBtn">▶ Calcular optimización</button>
   </div>
 
   <!-- RESULTS -->
   <div class="card" id="resultsCard">
-    <div class="card-title">Resultado comparativo</div>
+    <div class="card-title">Resultado</div>
     <div id="result"><p class="placeholder">Aún no calculado — presiona Comparar.</p></div>
   </div>
 
   <!-- AREA DE CORTES -->
-  <div class="card" id="areaCard">
+  <div class="card" id="areaCard" style="display:none">
     <div class="card-title">Área de cortes</div>
     <div id="cutsArea"><p class="placeholder">Aún no calculado.</p></div>
   </div>
 
   <!-- COSTOS -->
-  <div class="card" id="costCard">
+  <div class="card" id="costCard" style="display:none">
     <div class="card-title">Costos comparativos por tarifa</div>
     <div id="costTable"><p class="placeholder">Aún no calculado.</p></div>
   </div>
 
 
   <!-- COTIZADOR -->
-  <div class="card" id="quoterCard">
+  <div class="card" id="quoterCard" style="display:none">
     <div class="card-title">Cotizador rápido</div>
     <div id="quoterBody"><p class="placeholder">Calcula primero para habilitar el cotizador.</p></div>
   </div>
@@ -990,16 +990,46 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
   const origArea = originalArea(pieces);
   const minLM = Math.min(...allResults.map(r => r.linearMeters));
 
-  // ── Result cards ──
-  let html = `<div class="results-grid">`;
+  // ── Collect all empate warnings across both rolls (deduplicated) ──
+  const allWarnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
+
+  // ── Build simplified 2-card layout ──
+  let html = "";
+
+  // Empate alerts at the top
+  if (allWarnings.length) {
+    allWarnings.forEach(w => {
+      // w is like: "Pieza 2.00×1.60 m no cabe en rollo de 1.52 m — omitida."
+      // Extract dimensions and show custom message
+      const match = w.match(/Pieza ([\d.]+)×([\d.]+)/);
+      if (match) {
+        // Find the original piece to get qty
+        const pw = parseFloat(match[1]);
+        const ph = parseFloat(match[2]);
+        const orig = pieces.find(p =>
+          (Math.abs((p.width + garbageW) - pw) < 0.001) ||
+          (Math.abs(p.width - pw) < 0.001)
+        );
+        const qty = orig ? orig.amount : "?";
+        const ow = orig ? orig.width : pw;
+        const oh = orig ? orig.height : ph;
+        html += `<div class="warning-box" style="margin-bottom:14px">
+          ⚠ La medida <strong>${ow} × ${oh} m</strong>, cantidad <strong>${qty}</strong>, requiere empate y no fue tomada en cuenta en esta optimización. Esa medida la debes calcular manualmente.
+        </div>`;
+      } else {
+        html += `<div class="warning-box" style="margin-bottom:14px">⚠ ${w}</div>`;
+      }
+    });
+  }
+
+  // Two result cards side by side
+  html += `<div class="results-grid" style="grid-template-columns:1fr 1fr;gap:16px">`;
   allResults.forEach(r => {
     const isWinner = r.linearMeters === minLM;
     const isTied = allResults.filter(x => x.linearMeters === minLM).length > 1;
     const cls = isTied ? "tied" : isWinner ? "winner" : "loser";
-    const badge = isTied ? `<span class="badge badge-tie">Empate</span>` : isWinner ? `<span class="badge badge-win">Mejor</span>` : "";
-    const wArea = workAreaFromShelves(r.shelves, r.rollWidth);
-    const eff = origArea > 0 ? Math.min(100, (origArea / wArea) * 100) : 0;
-    const waste = wArea - origArea;
+    const badge = isTied ? `<span class="badge badge-tie">Empate</span>` : isWinner ? `<span class="badge badge-win">✓ Mejor</span>` : "";
+    const cvId = `cv_${r.rollWidth.toString().replace(".","_")}`;
 
     html += `
       <div class="result-card ${cls}">
@@ -1007,58 +1037,38 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
         <div class="roll-label">Rollo ${r.rollWidth} m</div>
         <div class="big-num">${fmt(r.linearMeters)}</div>
         <div class="unit">metros lineales</div>
-        <div class="eff-bar-wrap" style="margin-top:14px">
-          <div class="eff-label"><span>Aprovechamiento</span><span>${fmt(eff, 1)}%</span></div>
-          <div class="eff-bar"><div class="eff-fill" style="width:${eff}%"></div></div>
+        <div style="margin-top:10px;margin-bottom:16px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px">Área total de cortes</div>
+          <div style="font-family:'Unbounded',sans-serif;font-size:1.1rem;font-weight:300;color:var(--text)">${fmt(origArea)} m²</div>
         </div>
-        <div style="margin-top:12px">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:3px">Área usada</div>
-          <div style="font-size:13px">${fmt(wArea)} m²</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px;margin-bottom:3px">Desperdicio</div>
-          <div style="font-size:13px;color:var(--accent3)">${fmt(waste)} m²</div>
+        <button class="btn btn-ghost" style="width:100%;font-size:12px;padding:9px 0;"
+          onclick="togglePlano('${cvId}', this)">
+          Ver plano de corte
+        </button>
+        <div id="wrap_${cvId}" style="display:none;margin-top:14px;">
+          <div class="canvas-wrap" style="padding:12px;">
+            <canvas id="${cvId}"></canvas>
+          </div>
         </div>
       </div>`;
   });
   html += `</div>`;
 
-  // Diferencias
-  if (allResults.length >= 2) {
-    const sorted = [...allResults].sort((a, b) => a.linearMeters - b.linearMeters);
-    html += `<div class="stats-row">`;
-    for (let i = 1; i < sorted.length; i++) {
-      const diff = sorted[i].linearMeters - sorted[0].linearMeters;
-      html += `
-        <div class="stat">
-          <div class="stat-label">Diferencia ${sorted[0].rollWidth}m vs ${sorted[i].rollWidth}m</div>
-          <div class="stat-val" style="color:var(--accent)">${fmt(diff)} m</div>
-        </div>`;
-    }
-    html += `<div class="stat">
-      <div class="stat-label">Área original total</div>
-      <div class="stat-val">${fmt(origArea)} m²</div>
-    </div>`;
-    html += `</div>`;
-  }
-
-  // Warnings
-  const allWarnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
-  if (allWarnings.length) {
-    html += allWarnings.map(w => `<div class="warning-box">⚠ ${w}</div>`).join("");
-  }
-
   document.getElementById("result").innerHTML = html;
 
-  // ── Área de cortes ──
-  renderCutsArea(pieces, origArea);
+  // Draw canvases (hidden initially, revealed on button click)
+  allResults.forEach(r => {
+    const cvId = `cv_${r.rollWidth.toString().replace(".","_")}`;
+    const canvas = document.getElementById(cvId);
+    if (canvas) drawCanvas(r, r.rollWidth, canvas);
+  });
+}
 
-  // ── Costos ──
-  renderCosts(allResults, prices, origArea, minLM);
-
-  // ── Canvas ──
-  renderCanvases(allResults, minLM);
-
-  // ── Quoter ──
-  renderQuoter(allResults, pieces);
+function togglePlano(cvId, btn) {
+  const wrap = document.getElementById("wrap_" + cvId);
+  const visible = wrap.style.display !== "none";
+  wrap.style.display = visible ? "none" : "block";
+  btn.textContent = visible ? "Ver plano de corte" : "Ocultar plano de corte";
 }
 
 function renderCutsArea(pieces, origArea) {
