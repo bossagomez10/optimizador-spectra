@@ -450,11 +450,11 @@
     <div class="card-title">Configuración general</div>
     <div class="grid-3">
       <div>
-        <label>Merma ancho (m)</label>
+        <label>Ventaja ancho (m)</label>
         <input id="garbageW" type="number" step="0.01" value="0.02" />
       </div>
       <div>
-        <label>Merma alto (m) — aplicada por fila</label>
+        <label>Ventaja alto (m) — aplicada por fila</label>
         <input id="garbageH" type="number" step="0.01" value="0.04" />
       </div>
       <div>
@@ -484,7 +484,6 @@
       <div id="cuts"></div>
       <div class="btn-group">
         <button class="btn btn-ghost" id="addCut">+ Agregar corte</button>
-        <button class="btn btn-ghost" id="loadExample">Cargar ejemplo</button>
       </div>
     </div>
 
@@ -569,21 +568,57 @@ function expandPieces(pieces, garbageW) {
 
 // ─── BEST FIT DECREASING SHELF ──────────────────────────────────────────────
 
+// ─── UTILIDADES ──────────────────────────────────────────────────────────────
+
+function rotate(piece) {
+  return { ...piece, width: piece.height, height: piece.width, rotated: !piece.rotated };
+}
+
+// ─── MOTOR PRINCIPAL ─────────────────────────────────────────────────────────
+// Mejoras aplicadas:
+// 1. Al abrir fila nueva, elige la orientación con MENOR rawHeight (no solo la que cabe)
+// 2. Best Fit evalúa ambas orientaciones y penaliza el aumento de rawH de la fila
+// 3. Penalización por incremento de altura de fila: prefiere fila que no suba el rawH
+// 4. 8 órdenes de prueba en lugar de 3
+// 5. Segundo pase de compactación: intenta mover piezas sueltas a filas existentes
+// 6. Normalización de dimensiones: siempre coloca la dimensión menor como ancho
+
 function bestFitShelves({ rollWidth, pieces, acceptsRotation, garbageW, garbageH }) {
   const expanded = expandPieces(pieces, garbageW);
+  const warnings = [];
 
-  // Intentar múltiples órdenes y quedarse con la mejor
+  // Filtrar piezas que no caben en el rollo de ninguna forma
+  const valid = [];
+  for (const p of expanded) {
+    const nOk = p.width  <= rollWidth;
+    const rOk = acceptsRotation && p.height <= rollWidth;
+    if (!nOk && !rOk) {
+      const msg = `Pieza ${p.originalWidth}×${p.originalHeight} no cabe en rollo de ${rollWidth} m — omitida.`;
+      if (!warnings.includes(msg)) warnings.push(msg);
+    } else {
+      valid.push(p);
+    }
+  }
+
+  // 8 ordenamientos distintos para maximizar chances de hallar el óptimo
   const orders = [
-    [...expanded].sort((a, b) => b.height - a.height || b.width - a.width),
-    [...expanded].sort((a, b) => b.width - a.width  || b.height - a.height),
-    [...expanded].sort((a, b) => (b.width * b.height) - (a.width * a.height)),
+    [...valid].sort((a,b) => b.height  - a.height  || b.width  - a.width),
+    [...valid].sort((a,b) => b.width   - a.width   || b.height - a.height),
+    [...valid].sort((a,b) => (b.width*b.height) - (a.width*a.height)),
+    [...valid].sort((a,b) => Math.max(b.width,b.height) - Math.max(a.width,a.height)),
+    [...valid].sort((a,b) => Math.min(b.width,b.height) - Math.min(a.width,a.height)),
+    // Mismos 3 primeros pero con piezas orientadas preferentemente con menor dim como ancho
+    [...valid].map(p => acceptsRotation && p.height < p.width ? rotate(p) : p)
+              .sort((a,b) => b.height - a.height || b.width - a.width),
+    [...valid].map(p => acceptsRotation && p.height < p.width ? rotate(p) : p)
+              .sort((a,b) => (b.width*b.height) - (a.width*a.height)),
+    [...valid].sort((a,b) => a.height - b.height || a.width - b.width), // ascendente
   ];
 
   let best = null;
-  const warnings = [];
 
   for (const sorted of orders) {
-    const result = runShelfPack(sorted, rollWidth, acceptsRotation, garbageH, warnings);
+    const result = runShelfPack(sorted, rollWidth, acceptsRotation, garbageH);
     if (!best || result.linearMeters < best.linearMeters) {
       best = result;
     }
@@ -592,109 +627,126 @@ function bestFitShelves({ rollWidth, pieces, acceptsRotation, garbageW, garbageH
   return { ...best, expanded, warnings };
 }
 
-function runShelfPack(sorted, rollWidth, acceptsRotation, garbageH, warnings) {
+function runShelfPack(sorted, rollWidth, acceptsRotation, garbageH) {
   const shelves = [];
-  let currentShelf = null;
-  const skipped = [];
 
-  for (const originalPiece of sorted) {
-    // Determinar mejor orientación para la pieza (probar siempre ambas)
-    let piece = chooseBestOrientation(originalPiece, currentShelf ? rollWidth - currentShelf.usedWidth : rollWidth, rollWidth, acceptsRotation);
-
-    if (!piece) {
-      // No cabe de ninguna forma en el rollo completo
-      const msg = `Pieza ${originalPiece.originalWidth}×${originalPiece.originalHeight} no cabe en rollo de ${rollWidth} m — omitida.`;
-      if (!warnings.includes(msg)) warnings.push(msg);
-      skipped.push(originalPiece);
-      continue;
-    }
-
-    // Best Fit: buscar la fila donde quede MENOS espacio sobrante tras colocar la pieza
-    let bestShelfIdx = -1;
-    let bestLeftover = Infinity;
+  for (const orig of sorted) {
+    // ── Buscar la mejor fila existente ──────────────────────────────────────
+    // Criterio: minimizar (aumento de rawH * rollWidth) + espacio sobrante
+    // Esto penaliza colocar una pieza alta en una fila que ya tiene rawH menor
+    let bestIdx   = -1;
+    let bestScore = Infinity;
 
     for (let i = 0; i < shelves.length; i++) {
-      const shelf = shelves[i];
-      const remaining = rollWidth - shelf.usedWidth;
+      const shelf   = shelves[i];
+      const rem     = rollWidth - shelf.usedWidth;
 
-      // Probar orientación normal
-      if (originalPiece.width <= remaining) {
-        const leftover = remaining - originalPiece.width;
-        if (leftover < bestLeftover) { bestLeftover = leftover; bestShelfIdx = i; }
+      // Probar normal
+      if (orig.width <= rem) {
+        const newH    = Math.max(shelf.rawHeight, orig.height);
+        const deltaH  = newH - shelf.rawHeight;          // cuánto sube la fila
+        const leftover = rem - orig.width;
+        // Score: penaliza subir la fila (costoso) + sobrante lateral (leve)
+        const score   = deltaH * rollWidth + leftover * 0.1;
+        if (score < bestScore) { bestScore = score; bestIdx = i; }
       }
       // Probar rotada
-      if (acceptsRotation && originalPiece.height <= remaining && originalPiece.width <= rollWidth) {
-        const leftover = remaining - originalPiece.height;
-        if (leftover < bestLeftover) { bestLeftover = leftover; bestShelfIdx = i; }
+      if (acceptsRotation && orig.height <= rem && orig.width <= rollWidth) {
+        const rotH    = orig.width;   // height tras rotar
+        const newH    = Math.max(shelf.rawHeight, rotH);
+        const deltaH  = newH - shelf.rawHeight;
+        const leftover = rem - orig.height;
+        const score   = deltaH * rollWidth + leftover * 0.1;
+        if (score < bestScore) { bestScore = score; bestIdx = i; }
       }
     }
 
-    if (bestShelfIdx >= 0) {
-      const shelf = shelves[bestShelfIdx];
-      const remaining = rollWidth - shelf.usedWidth;
-      // Re-decidir orientación para esta fila específica
-      let chosen = tryOrient(originalPiece, remaining, rollWidth, acceptsRotation);
-      if (!chosen) chosen = piece;
+    if (bestIdx >= 0) {
+      // Colocar en la fila elegida con la mejor orientación para ESA fila
+      const shelf = shelves[bestIdx];
+      const rem   = rollWidth - shelf.usedWidth;
+      let chosen  = pickBestOrient(orig, rem, rollWidth, acceptsRotation, shelf.rawHeight);
       shelf.items.push(chosen);
       shelf.usedWidth += chosen.width;
-      shelf.rawHeight = Math.max(shelf.rawHeight, chosen.height);
+      shelf.rawHeight  = Math.max(shelf.rawHeight, chosen.height);
+
     } else {
-      // Nueva fila
-      let chosen = piece;
-      if (chosen.width > rollWidth) {
-        // intenta rotar
-        if (acceptsRotation && chosen.height <= rollWidth) {
-          chosen = rotate(chosen);
-        } else {
-          continue; // ya en warnings
-        }
-      }
-      currentShelf = {
+      // ── Abrir fila nueva ─────────────────────────────────────────────────
+      // FIX CLAVE: elegir la orientación con MENOR altura para la nueva fila
+      // Ej: pieza 0.27×1.80 — sin rotar abre fila de rawH=1.80
+      //                      — rotada   abre fila de rawH=0.27 ← mucho mejor
+      let chosen = pickOrientForNewShelf(orig, rollWidth, acceptsRotation);
+      if (!chosen) continue; // no cabe de ninguna forma (ya filtrado arriba)
+      shelves.push({
         usedWidth: chosen.width,
-        rawHeight: chosen.height,  // sin merma de alto todavía
-        items: [chosen],
-      };
-      shelves.push(currentShelf);
+        rawHeight: chosen.height,
+        items:     [chosen],
+      });
     }
   }
 
-  // Aplicar merma de alto UNA VEZ por fila
+  // ── Pase de compactación ─────────────────────────────────────────────────
+  // Recorre piezas de filas con una sola pieza e intenta moverlas a otra fila
+  // sin aumentar su rawH → reduce número de filas en casos simples
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let i = shelves.length - 1; i >= 0; i--) {
+      if (shelves[i].items.length !== 1) continue;
+      const piece = shelves[i].items[0];
+      for (let j = 0; j < shelves.length; j++) {
+        if (j === i) continue;
+        const shelf = shelves[j];
+        const rem   = rollWidth - shelf.usedWidth;
+        // Solo mover si NO aumenta el rawH de la fila destino
+        const fitsN = piece.width  <= rem && piece.height <= shelf.rawHeight;
+        const fitsR = acceptsRotation && piece.height <= rem && piece.width <= shelf.rawHeight;
+        if (fitsN || fitsR) {
+          const chosen = fitsN ? piece : rotate(piece);
+          shelf.items.push(chosen);
+          shelf.usedWidth += chosen.width;
+          shelf.rawHeight  = Math.max(shelf.rawHeight, chosen.height);
+          shelves.splice(i, 1);
+          improved = true;
+          break;
+        }
+      }
+      if (improved) break;
+    }
+  }
+
+  // Aplicar ventaja alto UNA VEZ por fila
   shelves.forEach(s => { s.height = s.rawHeight + garbageH; });
   const linearMeters = shelves.reduce((sum, s) => sum + s.height, 0);
-
-  return { linearMeters, shelves, skipped };
+  return { linearMeters, shelves };
 }
 
-function rotate(piece) {
-  return { ...piece, width: piece.height, height: piece.width, rotated: !piece.rotated };
-}
+// Elige la mejor orientación para colocar en una fila existente
+// Minimiza: aumento de rawH de la fila + espacio sobrante lateral
+function pickBestOrient(orig, rem, rollWidth, canRotate, shelfRawH) {
+  const nFits = orig.width  <= rem;
+  const rFits = canRotate && orig.height <= rem && orig.width <= rollWidth;
 
-function tryOrient(piece, remainingWidth, rollWidth, acceptsRotation) {
-  if (piece.width <= remainingWidth) return piece;
-  if (acceptsRotation && piece.height <= remainingWidth && piece.width <= rollWidth) return rotate(piece);
-  return null;
-}
+  if (!nFits && !rFits) return orig; // fallback
 
-function chooseBestOrientation(piece, remainingWidth, rollWidth, acceptsRotation) {
-  const normalOk = piece.width <= rollWidth;
-  const rotatedOk = acceptsRotation && piece.height <= rollWidth && piece.width <= rollWidth;
-
-  if (!normalOk && !rotatedOk) return null;
-
-  // Si ambas caben en la fila actual, elegir la que deje menos espacio sobrante
-  const normalFits = piece.width <= remainingWidth;
-  const rotatedFits = acceptsRotation && piece.height <= remainingWidth;
-
-  if (normalFits && rotatedFits) {
-    const leftoverNormal = remainingWidth - piece.width;
-    const leftoverRotated = remainingWidth - piece.height;
-    return leftoverNormal <= leftoverRotated ? piece : rotate(piece);
+  if (nFits && rFits) {
+    const scoreN = Math.max(shelfRawH, orig.height)  - shelfRawH + (rem - orig.width)  * 0.1;
+    const scoreR = Math.max(shelfRawH, orig.width)   - shelfRawH + (rem - orig.height) * 0.1;
+    return scoreN <= scoreR ? orig : rotate(orig);
   }
-  if (normalFits) return piece;
-  if (rotatedFits) return rotate(piece);
-  if (normalOk) return piece;
-  if (rotatedOk) return rotate(piece);
-  return null;
+  return nFits ? orig : rotate(orig);
+}
+
+// Elige la orientación con MENOR altura al abrir una fila nueva
+function pickOrientForNewShelf(orig, rollWidth, canRotate) {
+  const nOk = orig.width  <= rollWidth;
+  const rOk = canRotate && orig.height <= rollWidth;
+  if (!nOk && !rOk) return null;
+  if (nOk && rOk) {
+    // Preferir la orientación que deja menor rawH en la nueva fila
+    return orig.height <= orig.width ? orig : rotate(orig);
+  }
+  return nOk ? orig : rotate(orig);
 }
 
 // ─── AREAS ──────────────────────────────────────────────────────────────────
@@ -779,119 +831,156 @@ const PALETTE = [
   "#f09060","#60f0d0","#f060c8","#90c0f0","#f0f060","#90f090",
 ];
 
-function drawCanvas(result, rollWidth, canvas) {
-  const ctx = canvas.getContext("2d");
+// SVG color palette
+const SVG_PALETTE = [
+  {fill:"#dbeafe",stroke:"#2563eb"},
+  {fill:"#dcfce7",stroke:"#16a34a"},
+  {fill:"#fef9c3",stroke:"#b45309"},
+  {fill:"#fce7f3",stroke:"#db2777"},
+  {fill:"#ede9fe",stroke:"#7c3aed"},
+  {fill:"#ffedd5",stroke:"#ea580c"},
+  {fill:"#cffafe",stroke:"#0891b2"},
+  {fill:"#fee2e2",stroke:"#dc2626"},
+];
+
+function drawSVG(result, rollWidth, container) {
   const totalH = result.shelves.reduce((s, sh) => s + sh.height, 0);
   if (totalH === 0) return;
 
-  const maxW = 820;
-  const scale = Math.min(maxW / rollWidth, 260 / Math.max(totalH, 0.5));
-  const pad = 10;
-  const labelW = 130;
+  const PX = Math.min(680 / rollWidth, Math.max(80, 300 / Math.max(totalH, 0.5)));
+  const PAD = 28;
+  const RPAD = 100; // right label space
+  const svgW = PAD + rollWidth * PX + RPAD;
+  const svgH = PAD + 24 + totalH * PX + 44;
+  const rollX = PAD;
+  const rollY = PAD + 24;
 
-  canvas.width = Math.max(600, rollWidth * scale + pad * 2 + labelW);
-  canvas.height = Math.max(200, totalH * scale + pad * 2 + 30);
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Roll outline
-  ctx.strokeStyle = "#444";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(pad, pad, rollWidth * scale, totalH * scale);
-
-  // Waste background
-  ctx.fillStyle = "rgba(0,0,0,0.02)";
-  ctx.fillRect(pad, pad, rollWidth * scale, totalH * scale);
-
-  let cy = 0;
+  let els = "";
   let colorIdx = 0;
 
+  // ── Roll background ──
+  els += `<rect x="${rollX}" y="${rollY}" width="${rollWidth*PX}" height="${totalH*PX}"
+    fill="#f9fafb" stroke="#d1d5db" stroke-width="1.5" rx="3"/>`;
+
+  // ── Top dimension: ancho del rollo ──
+  els += `
+    <line x1="${rollX}" y1="${rollY-8}" x2="${rollX+rollWidth*PX}" y2="${rollY-8}" stroke="#9ca3af" stroke-width="1"/>
+    <line x1="${rollX}" y1="${rollY-12}" x2="${rollX}" y2="${rollY-4}" stroke="#9ca3af" stroke-width="1"/>
+    <line x1="${rollX+rollWidth*PX}" y1="${rollY-12}" x2="${rollX+rollWidth*PX}" y2="${rollY-4}" stroke="#9ca3af" stroke-width="1"/>
+    <text x="${rollX+rollWidth*PX/2}" y="${rollY-12}" text-anchor="middle"
+      font-size="10" fill="#6b7280" font-family="DM Sans,sans-serif" font-weight="600">
+      ancho rollo: ${rollWidth} m
+    </text>`;
+
+  let cy = 0;
   result.shelves.forEach((shelf, si) => {
+    const shH   = shelf.height   * PX;
+    const rawH  = shelf.rawHeight * PX;
+    const shY   = rollY + cy * PX;
+
+    // Row divider
+    if (si > 0) {
+      els += `<line x1="${rollX}" y1="${shY}" x2="${rollX+rollWidth*PX}" y2="${shY}"
+        stroke="#e5e7eb" stroke-width="1" stroke-dasharray="5,3"/>`;
+    }
+
+    // Ventaja strip at bottom of row
+    const ventH = shH - rawH;
+    if (ventH > 1) {
+      els += `<rect x="${rollX}" y="${shY+rawH}" width="${rollWidth*PX}" height="${ventH}"
+        fill="rgba(200,21,42,0.07)" stroke="none"/>
+        <text x="${rollX+4}" y="${shY+rawH+ventH/2+4}"
+          font-size="8" fill="#c8152a" font-family="DM Sans,sans-serif" font-style="italic">
+          ventaja ${((shelf.height-shelf.rawHeight)*100).toFixed(0)} cm
+        </text>`;
+    }
+
+    // Pieces
     let cx = 0;
-    const shH = shelf.height * scale;
-    const rawH = shelf.rawHeight * scale;
-
-    // Merma de alto (zona inferior de la fila)
-    ctx.fillStyle = "rgba(200,21,42,0.06)";
-    ctx.fillRect(pad, pad + cy * scale + rawH, rollWidth * scale, shH - rawH);
-
     shelf.items.forEach(item => {
-      const x = pad + cx * scale;
-      const y = pad + cy * scale;
-      const w = item.width * scale;
-      const h = item.height * scale;
+      const col  = SVG_PALETTE[colorIdx % SVG_PALETTE.length];
+      const px   = rollX + cx * PX;
+      const py   = shY;
+      const pw   = item.width  * PX;
+      const ph   = item.height * PX;
 
-      const col = PALETTE[colorIdx % PALETTE.length];
-      ctx.fillStyle = col + "33";
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, y, w, h);
+      els += `<rect x="${px}" y="${py}" width="${pw}" height="${ph}"
+        fill="${col.fill}" stroke="${col.stroke}" stroke-width="1.5" rx="2"/>`;
 
-      // Dimensions: show original size centered inside the piece
-      if (w > 28 && h > 20) {
-        const lineW = `${item.originalWidth.toFixed(2)} m`;
-        const lineH = `${item.originalHeight.toFixed(2)} m`;
-        const fontSize = Math.max(8, Math.min(11, w / 7));
-        ctx.font = `bold ${fontSize}px DM Mono, monospace`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
+      // Always show label pill
+      const lw = item.originalWidth.toFixed(2)  + " m";
+      const lh = item.originalHeight.toFixed(2) + " m";
+      const pillW = 58;
+      const pillH = 28;
+      const lx = px + pw/2 - pillW/2;
+      const ly = py + ph/2 - pillH/2;
 
-        // Semi-transparent pill background
-        const textW = Math.max(
-          ctx.measureText(lineW).width,
-          ctx.measureText(lineH).width
-        ) + 10;
-        const textH = fontSize * 2 + 10;
-        const tx = x + w / 2;
-        const ty = y + h / 2;
+      els += `<rect x="${lx}" y="${ly}" width="${pillW}" height="${pillH}"
+        fill="white" fill-opacity="0.93" rx="4" stroke="${col.stroke}" stroke-width="0.8"/>
+        <text x="${px+pw/2}" y="${py+ph/2-3}" text-anchor="middle"
+          font-size="9" font-weight="700" fill="${col.stroke}"
+          font-family="DM Sans,sans-serif">${lw}</text>
+        <text x="${px+pw/2}" y="${py+ph/2+10}" text-anchor="middle"
+          font-size="9" fill="#374151"
+          font-family="DM Sans,sans-serif">${lh}</text>`;
 
-        ctx.fillStyle = "rgba(255,255,255,0.88)";
-        ctx.beginPath();
-        ctx.roundRect(tx - textW / 2, ty - textH / 2, textW, textH, 3);
-        ctx.fill();
-
-        ctx.fillStyle = col;
-        ctx.fillText(lineW, tx, ty - fontSize / 2 - 1);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(lineH, tx, ty + fontSize / 2 + 1);
-
-        ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
+      if (item.rotated) {
+        els += `<text x="${px+pw-3}" y="${py+11}" text-anchor="end"
+          font-size="9" fill="${col.stroke}" font-family="DM Sans,sans-serif">↺</text>`;
       }
 
       cx += item.width;
       colorIdx++;
     });
 
-    // Waste at end of row
-    const usedW = shelf.usedWidth * scale;
-    if (rollWidth * scale - usedW > 2) {
-      ctx.fillStyle = "rgba(0,0,0,0.03)";
-      ctx.fillRect(pad + usedW, pad + cy * scale, rollWidth * scale - usedW, rawH);
+    // Empty space at end of row
+    const usedPX = shelf.usedWidth * PX;
+    const emptyW = rollWidth * PX - usedPX;
+    if (emptyW > 4) {
+      els += `<rect x="${rollX+usedPX}" y="${shY}" width="${emptyW}" height="${rawH}"
+        fill="rgba(0,0,0,0.03)" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="3,2" rx="1"/>
+        <text x="${rollX+usedPX+emptyW/2}" y="${shY+rawH/2+4}"
+          text-anchor="middle" font-size="8" fill="#9ca3af" font-family="DM Sans,sans-serif">
+          vacío
+        </text>`;
     }
 
-    // Row label
-    ctx.fillStyle = "#888880";
-    ctx.font = "10px DM Mono, monospace";
-    ctx.fillText(`F${si + 1}  h=${shelf.height.toFixed(2)}m`, pad + rollWidth * scale + 8, pad + cy * scale + 14);
+    // Row label (right side)
+    els += `
+      <text x="${rollX+rollWidth*PX+8}" y="${shY+14}"
+        font-size="10" fill="#374151" font-family="DM Sans,sans-serif" font-weight="700">F${si+1}</text>
+      <text x="${rollX+rollWidth*PX+8}" y="${shY+26}"
+        font-size="9" fill="#9ca3af" font-family="DM Sans,sans-serif">${shelf.height.toFixed(2)} m</text>`;
 
     cy += shelf.height;
   });
 
-  // Total line
-  ctx.strokeStyle = "#c8f060";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 3]);
-  ctx.beginPath();
-  ctx.moveTo(pad, pad + totalH * scale);
-  ctx.lineTo(pad + rollWidth * scale, pad + totalH * scale);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Total line + badge
+  const botY = rollY + totalH * PX;
+  els += `
+    <line x1="${rollX}" y1="${botY}" x2="${rollX+rollWidth*PX}" y2="${botY}"
+      stroke="#c8152a" stroke-width="2" stroke-dasharray="6,3"/>
+    <rect x="${rollX}" y="${botY+6}" width="150" height="22" fill="#c8152a" rx="4"/>
+    <text x="${rollX+75}" y="${botY+21}" text-anchor="middle"
+      font-size="11" font-weight="700" fill="white" font-family="DM Sans,sans-serif">
+      Total: ${totalH.toFixed(2)} m lineales
+    </text>`;
 
-  ctx.fillStyle = "#c8f060";
-  ctx.font = "bold 11px Syne, sans-serif";
-  ctx.fillText(`${totalH.toFixed(2)} m lineales`, pad + 4, pad + totalH * scale - 5);
+  // Left height arrow
+  const arX = rollX - 14;
+  els += `
+    <line x1="${arX}" y1="${rollY}" x2="${arX}" y2="${botY}" stroke="#9ca3af" stroke-width="1"/>
+    <line x1="${arX-3}" y1="${rollY}" x2="${arX+3}" y2="${rollY}" stroke="#9ca3af" stroke-width="1"/>
+    <line x1="${arX-3}" y1="${botY}" x2="${arX+3}" y2="${botY}" stroke="#9ca3af" stroke-width="1"/>
+    <text x="${arX-4}" y="${rollY + totalH*PX/2}"
+      text-anchor="middle" font-size="9" fill="#6b7280" font-family="DM Sans,sans-serif"
+      transform="rotate(-90,${arX-4},${rollY+totalH*PX/2})">${totalH.toFixed(2)} m</text>`;
+
+  container.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 ${svgW} ${svgH}"
+    style="width:100%;max-width:${svgW}px;height:auto;display:block;">
+    ${els}
+  </svg>`;
 }
 
 
@@ -990,37 +1079,51 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
   const origArea = originalArea(pieces);
   const minLM = Math.min(...allResults.map(r => r.linearMeters));
 
-  // ── Collect all empate warnings across both rolls (deduplicated) ──
-  const allWarnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
+  // ── Agrupar warnings por pieza, indicando en qué rollos ocurre ──
+  // Estructura: { "ow×oh": { ow, oh, qty, rollos: [1.52, 1.82] } }
+  const warnMap = {};
+  allResults.forEach(r => {
+    (r.warnings || []).forEach(w => {
+      const match = w.match(/Pieza ([\d.]+)×([\d.]+)/);
+      if (!match) return;
+      const pw  = parseFloat(match[1]);
+      const ph  = parseFloat(match[2]);
+      const orig = pieces.find(p =>
+        Math.abs((p.width + garbageW) - pw) < 0.001 ||
+        Math.abs(p.width - pw) < 0.001
+      );
+      const key = `${orig ? orig.width : pw}×${orig ? orig.height : ph}`;
+      if (!warnMap[key]) {
+        warnMap[key] = {
+          ow:    orig ? orig.width  : pw,
+          oh:    orig ? orig.height : ph,
+          qty:   orig ? orig.amount : "?",
+          rollos: []
+        };
+      }
+      if (!warnMap[key].rollos.includes(r.rollWidth)) {
+        warnMap[key].rollos.push(r.rollWidth);
+      }
+    });
+  });
 
   // ── Build simplified 2-card layout ──
   let html = "";
 
-  // Empate alerts at the top
-  if (allWarnings.length) {
-    allWarnings.forEach(w => {
-      // w is like: "Pieza 2.00×1.60 m no cabe en rollo de 1.52 m — omitida."
-      // Extract dimensions and show custom message
-      const match = w.match(/Pieza ([\d.]+)×([\d.]+)/);
-      if (match) {
-        // Find the original piece to get qty
-        const pw = parseFloat(match[1]);
-        const ph = parseFloat(match[2]);
-        const orig = pieces.find(p =>
-          (Math.abs((p.width + garbageW) - pw) < 0.001) ||
-          (Math.abs(p.width - pw) < 0.001)
-        );
-        const qty = orig ? orig.amount : "?";
-        const ow = orig ? orig.width : pw;
-        const oh = orig ? orig.height : ph;
-        html += `<div class="warning-box" style="margin-bottom:14px">
-          ⚠ La medida <strong>${ow} × ${oh} m</strong>, cantidad <strong>${qty}</strong>, requiere empate y no fue tomada en cuenta en esta optimización. Esa medida la debes calcular manualmente.
-        </div>`;
-      } else {
-        html += `<div class="warning-box" style="margin-bottom:14px">⚠ ${w}</div>`;
-      }
-    });
-  }
+  // Empate alerts at the top — con indicación de en qué rollo(s)
+  Object.values(warnMap).forEach(({ ow, oh, qty, rollos }) => {
+    const totalRolls  = allResults.length;
+    const affectedAll = rollos.length === totalRolls;
+    const rollosStr   = rollos.map(rw => `${rw} m`).join(" y ");
+    const enRollos    = affectedAll
+      ? "en ambos anchos de rollo"
+      : `solo en el rollo de ${rollosStr}`;
+    html += `<div class="warning-box" style="margin-bottom:14px">
+      ⚠ La medida <strong>${ow} × ${oh} m</strong>, cantidad <strong>${qty}</strong>,
+      requiere empate <strong>${enRollos}</strong> y no fue tomada en cuenta en esa optimización.
+      Debes calcularla manualmente.
+    </div>`;
+  });
 
   // Two result cards side by side
   html += `<div class="results-grid" style="grid-template-columns:1fr 1fr;gap:16px">`;
@@ -1046,8 +1149,7 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
           Ver plano de corte
         </button>
         <div id="wrap_${cvId}" style="display:none;margin-top:14px;">
-          <div class="canvas-wrap" style="padding:12px;">
-            <canvas id="${cvId}"></canvas>
+          <div class="canvas-wrap" style="padding:16px;overflow-x:auto;">
           </div>
         </div>
       </div>`;
@@ -1060,7 +1162,8 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
   allResults.forEach(r => {
     const cvId = `cv_${r.rollWidth.toString().replace(".","_")}`;
     const canvas = document.getElementById(cvId);
-    if (canvas) drawCanvas(r, r.rollWidth, canvas);
+    const wrapOuter = document.getElementById('wrap_' + cvId);
+    if (wrapOuter) { const inner = wrapOuter.querySelector('.canvas-wrap'); if (inner) drawSVG(r, r.rollWidth, inner); }
   });
 }
 
@@ -1069,6 +1172,8 @@ function togglePlano(cvId, btn) {
   const visible = wrap.style.display !== "none";
   wrap.style.display = visible ? "none" : "block";
   btn.textContent = visible ? "Ver plano de corte" : "Ocultar plano de corte";
+  btn.style.borderColor = visible ? "" : "var(--accent)";
+  btn.style.color = visible ? "" : "var(--accent)";
 }
 
 function renderCutsArea(pieces, origArea) {
@@ -1184,30 +1289,47 @@ document.getElementById("optimizeBtn").addEventListener("click", () => {
 
     renderResults(allResults, pieces, prices, garbageW, garbageH);
 
+    // ── Save to Airtable via Make webhook ──
+    saveToAirtable(allResults, pieces, garbageW, garbageH);
+
   } catch (err) {
     document.getElementById("result").innerHTML = `<div class="warning-box">⚠ ${err.message}</div>`;
   }
 });
 
+function saveToAirtable(allResults, pieces, garbageW, garbageH) {
+  const webhookUrl = "TU_WEBHOOK_URL_DE_MAKE";
+  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") return; // skip if not configured
+
+  const r152 = allResults.find(r => r.rollWidth === 1.52);
+  const r182 = allResults.find(r => r.rollWidth === 1.82);
+  const origArea = pieces.reduce((s, p) => s + p.width * p.height * p.amount, 0);
+  const warnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
+
+  const payload = {
+    fecha: new Date().toISOString(),
+    medidas: pieces.map(p => `${p.width}x${p.height} (x${p.amount})`).join(", "),
+    metros_152: r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
+    metros_182: r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
+    area_total_m2: parseFloat(origArea.toFixed(3)),
+    ventaja_ancho: garbageW,
+    ventaja_alto: garbageH,
+    advertencias: warnings.join(" | ") || ""
+  };
+
+  fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).catch(() => {}); // silent fail — don't interrupt UX
+}
+
 document.getElementById("addRoll").addEventListener("click",  () => addRollRow());
 document.getElementById("addCut").addEventListener("click",   () => addCutRow());
 document.getElementById("addPrice").addEventListener("click", () => addPriceRow());
 
-document.getElementById("loadExample").addEventListener("click", () => {
-  document.getElementById("cuts").innerHTML = "";
-  document.getElementById("prices").innerHTML = "";
-  document.getElementById("rolls").innerHTML = "";
-  addRollRow(1.52); addRollRow(1.82);
-  addCutRow(1.2, 2.3, 2);
-  addCutRow(0.25, 1.8, 4);
-  addPriceRow("Metalizada", 95000, 62000);
-  addPriceRow("Cerámica", 135000, 89000);
-});
-
 // Default load
 addRollRow(1.52); addRollRow(1.82);
-addCutRow(1.2, 2.3, 2);
-addCutRow(0.25, 1.8, 4);
 addPriceRow("Metalizada", 95000, 62000);
 addPriceRow("Cerámica", 135000, 89000);
 </script>
