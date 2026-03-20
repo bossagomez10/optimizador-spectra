@@ -1345,10 +1345,10 @@ async function generateAndSendPDF() {
     doc.text("Optimizador Arquitectónico", MAR, 20);
 
     // Date top right
-    const now = new Date();
     const dateStr = now.toLocaleDateString("es-CO", { day:"2-digit", month:"short", year:"numeric" });
     const timeStr = now.toLocaleTimeString("es-CO", { hour:"2-digit", minute:"2-digit" });
     doc.setFontSize(8);
+    const now = new Date();
     doc.text(`${dateStr}  ${timeStr}`, W - MAR, 13, { align: "right" });
     doc.text("Cotización de corte", W - MAR, 20, { align: "right" });
 
@@ -1525,11 +1525,12 @@ async function generateAndSendPDF() {
     }
 
     // ── Download PDF locally ──
+    const now      = new Date();
+    const fileName = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
 
     // ── Get base64 and send to Make ──
     const pdfBase64 = doc.output("datauristring").split(",")[1];
-    const fileName  = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
 
     btn.textContent = "Guardando en Airtable...";
     await sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea);
