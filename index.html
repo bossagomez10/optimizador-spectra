@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Optimizador Arquitectónico — Spectra</title>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -1158,13 +1159,27 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
 
   document.getElementById("result").innerHTML = html;
 
-  // Draw canvases (hidden initially, revealed on button click)
+  // Draw SVGs (hidden initially, revealed on button click)
   allResults.forEach(r => {
     const cvId = `cv_${r.rollWidth.toString().replace(".","_")}`;
-    const canvas = document.getElementById(cvId);
     const wrapOuter = document.getElementById('wrap_' + cvId);
     if (wrapOuter) { const inner = wrapOuter.querySelector('.canvas-wrap'); if (inner) drawSVG(r, r.rollWidth, inner); }
   });
+
+  // Store last results for PDF generation
+  window._lastRenderState = { allResults, pieces, garbageW, garbageH, warnMap, origArea };
+
+  // Add PDF button below results
+  const pdfBtn = document.createElement("div");
+  pdfBtn.style.cssText = "margin-top:16px;";
+  pdfBtn.innerHTML = `
+    <button id="pdfBtn" class="btn-run" style="background:var(--accent);font-size:13px;padding:14px 0;display:flex;align-items:center;justify-content:center;gap:10px;">
+      ⬇ Guardar
+    </button>
+    <div id="pdfStatus" style="text-align:center;font-size:12px;color:var(--muted);margin-top:8px;min-height:18px;"></div>
+  `;
+  document.getElementById("resultsCard").appendChild(pdfBtn);
+  document.getElementById("pdfBtn").addEventListener("click", generateAndSendPDF);
 }
 
 function togglePlano(cvId, btn) {
@@ -1289,39 +1304,277 @@ document.getElementById("optimizeBtn").addEventListener("click", () => {
 
     renderResults(allResults, pieces, prices, garbageW, garbageH);
 
-    // ── Save to Airtable via Make webhook ──
-    saveToAirtable(allResults, pieces, garbageW, garbageH);
 
   } catch (err) {
     document.getElementById("result").innerHTML = `<div class="warning-box">⚠ ${err.message}</div>`;
   }
 });
 
-function saveToAirtable(allResults, pieces, garbageW, garbageH) {
-  const webhookUrl = "TU_WEBHOOK_URL_DE_MAKE";
-  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") return; // skip if not configured
+async function generateAndSendPDF() {
+  const state = window._lastRenderState;
+  if (!state) return;
+  const { allResults, pieces, garbageW, garbageH, warnMap, origArea } = state;
+
+  const btn = document.getElementById("pdfBtn");
+  const status = document.getElementById("pdfStatus");
+  btn.disabled = true;
+  btn.textContent = "Generando PDF...";
+  status.textContent = "";
+
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210, MAR = 18;
+    let y = 18;
+
+    const RED    = [200, 21, 42];
+    const DARK   = [26, 26, 24];
+    const MUTED  = [120, 120, 120];
+    const LGRAY  = [240, 240, 238];
+    const WHITE  = [255, 255, 255];
+
+    // ── Header bar ──
+    doc.setFillColor(...RED);
+    doc.rect(0, 0, W, 28, "F");
+    doc.setTextColor(...WHITE);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("SPECTRA", MAR, 13);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("Optimizador Arquitectónico", MAR, 20);
+
+    // Date top right
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("es-CO", { day:"2-digit", month:"short", year:"numeric" });
+    const timeStr = now.toLocaleTimeString("es-CO", { hour:"2-digit", minute:"2-digit" });
+    doc.setFontSize(8);
+    doc.text(`${dateStr}  ${timeStr}`, W - MAR, 13, { align: "right" });
+    doc.text("Cotización de corte", W - MAR, 20, { align: "right" });
+
+    y = 38;
+
+    // ── Results summary: 2 boxes ──
+    const r152 = allResults.find(r => r.rollWidth === 1.52);
+    const r182 = allResults.find(r => r.rollWidth === 1.82);
+    const minLM = Math.min(...allResults.map(r => r.linearMeters));
+    const BOX_W = (W - MAR*2 - 6) / 2;
+
+    allResults.forEach((r, i) => {
+      const bx = MAR + i * (BOX_W + 6);
+      const isWinner = r.linearMeters === minLM;
+      doc.setFillColor(...(isWinner ? RED : LGRAY));
+      doc.roundedRect(bx, y, BOX_W, 28, 3, 3, "F");
+      doc.setTextColor(...(isWinner ? WHITE : MUTED));
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text(`ROLLO ${r.rollWidth} m${isWinner ? "  ✓ MEJOR" : ""}`, bx + 5, y + 8);
+      doc.setTextColor(...(isWinner ? WHITE : DARK));
+      doc.setFontSize(20);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${r.linearMeters.toFixed(2)}`, bx + 5, y + 21);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text("m lineales", bx + 5 + doc.getTextWidth(`${r.linearMeters.toFixed(2)}`) + 2, y + 21);
+    });
+
+    y += 34;
+
+    // Area total pill
+    doc.setFillColor(...LGRAY);
+    doc.roundedRect(MAR, y, W - MAR*2, 12, 2, 2, "F");
+    doc.setTextColor(...MUTED);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("ÁREA TOTAL DE CORTES", MAR + 4, y + 8);
+    doc.setTextColor(...DARK);
+    doc.text(`${origArea.toFixed(3)} m²`, W - MAR - 4, y + 8, { align: "right" });
+    y += 18;
+
+    // ── Cuts table ──
+    doc.setFillColor(...RED);
+    doc.rect(MAR, y, W - MAR*2, 8, "F");
+    doc.setTextColor(...WHITE);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    const cols = [MAR+3, MAR+52, MAR+74, MAR+100, MAR+130];
+    doc.text("MEDIDA",       cols[0], y + 5.5);
+    doc.text("CANT.",        cols[1], y + 5.5);
+    doc.text("ÁREA UNIT.",   cols[2], y + 5.5);
+    doc.text("ÁREA TOTAL",   cols[3], y + 5.5);
+    doc.text("% DEL TOTAL",  cols[4], y + 5.5);
+    y += 8;
+
+    pieces.forEach((p, idx) => {
+      const unit  = p.width * p.height;
+      const total = unit * p.amount;
+      const pct   = origArea > 0 ? (total / origArea * 100).toFixed(1) : "0.0";
+      doc.setFillColor(...(idx % 2 === 0 ? WHITE : [248, 248, 246]));
+      doc.rect(MAR, y, W - MAR*2, 8, "F");
+      doc.setTextColor(...DARK);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${p.width.toFixed(2)} × ${p.height.toFixed(2)} m`, cols[0], y + 5.5);
+      doc.text(`${p.amount}`,                  cols[1], y + 5.5);
+      doc.text(`${unit.toFixed(3)} m²`,         cols[2], y + 5.5);
+      doc.text(`${total.toFixed(3)} m²`,        cols[3], y + 5.5);
+      doc.text(`${pct}%`,                       cols[4], y + 5.5);
+      y += 8;
+    });
+
+    // Total row
+    doc.setFillColor(...LGRAY);
+    doc.rect(MAR, y, W - MAR*2, 8, "F");
+    doc.setTextColor(...RED);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("TOTAL", cols[0], y + 5.5);
+    doc.text(`${origArea.toFixed(3)} m²`, cols[3], y + 5.5);
+    doc.text("100%", cols[4], y + 5.5);
+    y += 14;
+
+    // ── SVG planos de corte ──
+    for (const r of allResults) {
+      // Render SVG to canvas via temporary DOM element
+      const tmpDiv = document.createElement("div");
+      tmpDiv.style.cssText = "position:absolute;left:-9999px;top:0;background:white;";
+      document.body.appendChild(tmpDiv);
+      drawSVG(r, r.rollWidth, tmpDiv);
+      const svgEl = tmpDiv.querySelector("svg");
+
+      if (svgEl) {
+        // Convert SVG to PNG via canvas
+        const svgData = new XMLSerializer().serializeToString(svgEl);
+        const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+        const url = URL.createObjectURL(svgBlob);
+
+        await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const scale = 3; // hi-res
+            canvas.width  = img.width  * scale;
+            canvas.height = img.height * scale;
+            const ctx = canvas.getContext("2d");
+            ctx.scale(scale, scale);
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, img.width, img.height);
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+
+            const imgData = canvas.toDataURL("image/png");
+            const imgW = W - MAR*2;
+            const imgH = imgW * (canvas.height / canvas.width);
+
+            // Check if need new page
+            if (y + imgH + 20 > 280) { doc.addPage(); y = 18; }
+
+            // Section label
+            doc.setFillColor(...LGRAY);
+            doc.roundedRect(MAR, y, W - MAR*2, 8, 2, 2, "F");
+            doc.setTextColor(...MUTED);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7);
+            doc.text(`PLANO DE CORTE — ROLLO ${r.rollWidth} m`, MAR + 4, y + 5.5);
+            y += 10;
+
+            doc.addImage(imgData, "PNG", MAR, y, imgW, imgH);
+            y += imgH + 10;
+            resolve();
+          };
+          img.src = url;
+        });
+      }
+      document.body.removeChild(tmpDiv);
+    }
+
+    // ── Empate warnings ──
+    const warnEntries = Object.values(warnMap || {});
+    if (warnEntries.length) {
+      if (y + warnEntries.length * 10 + 16 > 280) { doc.addPage(); y = 18; }
+      doc.setFillColor(255, 243, 205);
+      doc.roundedRect(MAR, y, W - MAR*2, warnEntries.length * 10 + 12, 3, 3, "F");
+      doc.setDrawColor(253, 211, 77);
+      doc.roundedRect(MAR, y, W - MAR*2, warnEntries.length * 10 + 12, 3, 3, "S");
+      y += 8;
+      warnEntries.forEach(({ ow, oh, qty, rollos }) => {
+        const totalRolls  = allResults.length;
+        const affectedAll = rollos.length === totalRolls;
+        const rollosStr   = rollos.map(rw => `${rw} m`).join(" y ");
+        const enRollos    = affectedAll ? "en ambos anchos" : `solo en rollo ${rollosStr}`;
+        doc.setTextColor(146, 64, 14);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text(`⚠  ${ow} × ${oh} m, cant. ${qty} — requiere empate ${enRollos}. Calcular manualmente.`, MAR + 4, y);
+        y += 10;
+      });
+      y += 6;
+    }
+
+    // ── Footer ──
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFillColor(...LGRAY);
+      doc.rect(0, 287, W, 10, "F");
+      doc.setTextColor(...MUTED);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text("Spectra · Optimizador Arquitectónico", MAR, 293);
+      doc.text(`Página ${i} de ${pageCount}`, W - MAR, 293, { align: "right" });
+    }
+
+    // ── Download PDF locally ──
+    doc.save(fileName);
+
+    // ── Get base64 and send to Make ──
+    const pdfBase64 = doc.output("datauristring").split(",")[1];
+    const fileName  = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
+
+    btn.textContent = "Guardando en Airtable...";
+    await sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea);
+
+    btn.disabled = false;
+    btn.textContent = "⬇ Guardar";
+    status.style.color = "var(--accent)";
+    status.textContent = "✓ PDF descargado y guardado en Airtable";
+    setTimeout(() => { status.textContent = ""; }, 4000);
+
+  } catch (err) {
+    console.error(err);
+    btn.disabled = false;
+    btn.textContent = "⬇ Guardar";
+    status.style.color = "#dc2626";
+    status.textContent = "Error al generar el PDF. Revisa la consola.";
+  }
+}
+
+async function sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea) {
+  const webhookUrl = "https://hook.us2.make.com/b45r4e43quv8orbnpfzl9vhuxhiw6mxv";
+  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") return;
 
   const r152 = allResults.find(r => r.rollWidth === 1.52);
   const r182 = allResults.find(r => r.rollWidth === 1.82);
-  const origArea = pieces.reduce((s, p) => s + p.width * p.height * p.amount, 0);
   const warnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
 
   const payload = {
-    fecha: new Date().toISOString(),
-    medidas: pieces.map(p => `${p.width}x${p.height} (x${p.amount})`).join(", "),
-    metros_152: r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
-    metros_182: r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
-    area_total_m2: parseFloat(origArea.toFixed(3)),
-    ventaja_ancho: garbageW,
-    ventaja_alto: garbageH,
-    advertencias: warnings.join(" | ") || ""
+    fecha:          new Date().toISOString(),
+    nombre_archivo: fileName,
+    nombre:         identity ? identity.nombre : "",
+    cedula:         identity ? identity.cedula  : "",
+    medidas:        pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
+    metros_152:     r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
+    metros_182:     r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
+    area_total_m2:  parseFloat(origArea.toFixed(3)),
+    advertencias:   warnings.join(" | ") || "",
+    pdf_base64:     pdfBase64
   };
 
-  fetch(webhookUrl, {
-    method: "POST",
+  await fetch(webhookUrl, {
+    method:  "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  }).catch(() => {}); // silent fail — don't interrupt UX
+    body:    JSON.stringify(payload)
+  });
 }
 
 document.getElementById("addRoll").addEventListener("click",  () => addRollRow());
