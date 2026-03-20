@@ -1525,7 +1525,6 @@ async function generateAndSendPDF() {
     }
 
     // ── Download PDF locally ──
-    const now      = new Date();
     const fileName = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
 
