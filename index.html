@@ -1542,7 +1542,7 @@ async function generateAndSendPDF() {
     const pdfBase64 = doc.output("datauristring").split(",")[1];
 
     btn.textContent = "Guardando en Airtable...";
-    await sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea);
+    await sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea, identity);
 
     btn.disabled = false;
     btn.textContent = "⬇ Guardar";
@@ -1559,29 +1559,28 @@ async function generateAndSendPDF() {
   }
 }
 
-async function sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea) {
+async function sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea, identity) {
   const webhookUrl = "https://hook.us2.make.com/b45r4e43quv8orbnpfzl9vhuxhiw6mxv";
-  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") return;
 
   const r152 = allResults.find(r => r.rollWidth === 1.52);
   const r182 = allResults.find(r => r.rollWidth === 1.82);
   const warnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
 
+  // Send text data only — PDF downloaded locally
   const payload = {
-    fecha:          new Date().toISOString(),
-    nombre_archivo: fileName,
-    nombre:         identity ? identity.nombre : "",
-    cedula:         identity ? identity.cedula  : "",
-    medidas:        pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
-    metros_152:     r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
-    metros_182:     r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
-    area_total_m2:  parseFloat(origArea.toFixed(3)),
-    advertencias:   warnings.join(" | ") || "",
-    pdf_base64:     pdfBase64
+    fecha:         new Date().toISOString(),
+    nombre:        identity ? identity.nombre : "",
+    cedula:        identity ? identity.cedula  : "",
+    medidas:       pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
+    metros_152:    r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
+    metros_182:    r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
+    area_total_m2: parseFloat(origArea.toFixed(3)),
+    advertencias:  warnings.join(" | ") || ""
   };
 
   await fetch(webhookUrl, {
     method:  "POST",
+    mode:    "no-cors",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify(payload)
   });
