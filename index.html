@@ -1352,7 +1352,15 @@ async function generateAndSendPDF() {
     doc.text(`${dateStr}  ${timeStr}`, W - MAR, 13, { align: "right" });
     doc.text("Cotización de corte", W - MAR, 20, { align: "right" });
 
-    y = 38;
+    // Identity bar
+    doc.setFillColor(...LGRAY);
+    doc.rect(0, 28, W, 10, "F");
+    doc.setTextColor(...MUTED);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Elaborado por: ${identity.nombre}   ·   Cédula: ${identity.cedula}`, MAR, 35);
+
+    y = 44;
 
     // ── Results summary: 2 boxes ──
     const r152 = allResults.find(r => r.rollWidth === 1.52);
