@@ -1437,10 +1437,17 @@ async function generateAndSendPDF() {
     for (const r of allResults) {
       // Render SVG to canvas via temporary DOM element
       const tmpDiv = document.createElement("div");
-      tmpDiv.style.cssText = "position:absolute;left:-9999px;top:0;background:white;";
+      // Fix width to exactly A4 content width in px (174mm at 96dpi ≈ 659px)
+      tmpDiv.style.cssText = "position:absolute;left:-9999px;top:0;background:white;width:659px;overflow:hidden;";
       document.body.appendChild(tmpDiv);
       drawSVG(r, r.rollWidth, tmpDiv);
       const svgEl = tmpDiv.querySelector("svg");
+      // Force SVG to fit within 659px
+      if (svgEl) {
+        svgEl.setAttribute("width", "659");
+        svgEl.style.width = "659px";
+        svgEl.style.height = "auto";
+      }
 
       if (svgEl) {
         // Convert SVG to PNG via canvas
@@ -1451,20 +1458,23 @@ async function generateAndSendPDF() {
         await new Promise((resolve) => {
           const img = new Image();
           img.onload = () => {
+            // Use fixed width of 659px (A4 content area)
+            const fixedW = 659;
+            const ratio  = img.naturalHeight > 0 ? img.naturalHeight / img.naturalWidth : 1;
+            const fixedH = Math.round(fixedW * ratio);
             const canvas = document.createElement("canvas");
-            const scale = 3; // hi-res
-            canvas.width  = img.width  * scale;
-            canvas.height = img.height * scale;
+            canvas.width  = fixedW * 2;
+            canvas.height = fixedH * 2;
             const ctx = canvas.getContext("2d");
-            ctx.scale(scale, scale);
+            ctx.scale(2, 2);
             ctx.fillStyle = "white";
-            ctx.fillRect(0, 0, img.width, img.height);
-            ctx.drawImage(img, 0, 0);
+            ctx.fillRect(0, 0, fixedW, fixedH);
+            ctx.drawImage(img, 0, 0, fixedW, fixedH);
             URL.revokeObjectURL(url);
 
             const imgData = canvas.toDataURL("image/png");
             const imgW = W - MAR*2;
-            const imgH = imgW * (canvas.height / canvas.width);
+            const imgH = imgW * (fixedH / fixedW);
 
             // Check if need new page
             if (y + imgH + 20 > 280) { doc.addPage(); y = 18; }
