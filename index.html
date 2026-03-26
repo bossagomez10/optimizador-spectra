@@ -7,7 +7,7 @@
   <title>Optimizador Arquitectónico — Spectra</title>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9.40,300;0,9.40,400;0,9.40,500;0,9.40,600;1,9.40,300&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg:       #f7f7f5;
@@ -427,6 +427,15 @@
     .stat-divider { height: 1px; background: var(--border); margin: 10px 0; }
 
     /* ── RESPONSIVE ── */
+
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 9999; }
+    .modal-backdrop.active { display: flex; }
+    .modal-card { width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.18); }
+    .modal-title { font-family: 'Unbounded', sans-serif; font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+    .modal-sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; line-height: 1.45; }
+    .modal-grid { display: grid; gap: 12px; }
+    .modal-actions { display:flex; gap:10px; margin-top:18px; }
+
     @media (max-width: 900px) {
       .header { padding: 24px 20px; flex-direction: column; align-items: flex-start; gap: 8px; }
       .wrap { padding: 20px; }
@@ -536,6 +545,22 @@
     <div id="canvases"><p class="placeholder">Aún no calculado.</p></div>
   </div>
 
+</div>
+
+<div id="identityModal" class="modal-backdrop">
+  <div class="modal-card">
+    <div class="modal-title">Datos para guardar</div>
+    <div class="modal-sub">Completa estos datos antes de generar y guardar el PDF.</div>
+    <div class="modal-grid">
+      <div><label>Nombre</label><input id="idNombre" type="text" placeholder="Nombre completo"></div>
+      <div><label>Cédula</label><input id="idCedula" type="text" placeholder="Número de cédula"></div>
+      <div><label>Teléfono</label><input id="idTelefono" type="text" placeholder="Teléfono o celular"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="idCancel" class="btn btn-ghost" type="button" style="flex:1">Cancelar</button>
+      <button id="idSave" class="btn btn-primary" type="button" style="flex:1">Continuar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1083,31 +1108,18 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
 
   // ── Agrupar warnings por pieza, indicando en qué rollos ocurre ──
   // Estructura: { "ow×oh": { ow, oh, qty, rollos: [1.52, 1.82] } }
-  const EPS = 0.001;
   const warnMap = {};
-  const almostEqual = (a, b) => Math.abs(a - b) < EPS;
-
-  function findOriginalPiece(pw, ph) {
-    return pieces.find(p => {
-      const matchWithGarbage =
-        almostEqual(p.width + garbageW, pw) &&
-        almostEqual(p.height, ph);
-
-      const rawMatch =
-        almostEqual(p.width, pw) &&
-        almostEqual(p.height, ph);
-
-      return matchWithGarbage || rawMatch;
-    });
-  }
-
   allResults.forEach(r => {
     (r.warnings || []).forEach(w => {
       const match = w.match(/Pieza ([\d.]+)×([\d.]+)/);
       if (!match) return;
       const pw  = parseFloat(match[1]);
       const ph  = parseFloat(match[2]);
-      const orig = findOriginalPiece(pw, ph);
+      const orig = pieces.find(p => {
+        const sameWidthWithGarbage = Math.abs((p.width + garbageW) - pw) < 0.001 && Math.abs(p.height - ph) < 0.001;
+        const sameRawSize = Math.abs(p.width - pw) < 0.001 && Math.abs(p.height - ph) < 0.001;
+        return sameWidthWithGarbage || sameRawSize;
+      });
       const key = `${orig ? orig.width : pw}×${orig ? orig.height : ph}`;
       if (!warnMap[key]) {
         warnMap[key] = {
@@ -1194,7 +1206,7 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
     <div id="pdfStatus" style="text-align:center;font-size:12px;color:var(--muted);margin-top:8px;min-height:18px;"></div>
   `;
   document.getElementById("resultsCard").appendChild(pdfBtn);
-  document.getElementById("pdfBtn").addEventListener("click", generateAndSendPDF);
+  document.getElementById("pdfBtn").addEventListener("click", _onSave);
 }
 
 function togglePlano(cvId, btn) {
@@ -1325,281 +1337,289 @@ document.getElementById("optimizeBtn").addEventListener("click", () => {
   }
 });
 
-async function generateAndSendPDF() {
+async function generateAndSendPDF(identity) {
   const state = window._lastRenderState;
-  if (!state) return;
+  if (!state) return { ok:false, error:"No hay resultados para guardar." };
   const { allResults, pieces, garbageW, garbageH, warnMap, origArea } = state;
 
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   const btn = document.getElementById("pdfBtn");
   const status = document.getElementById("pdfStatus");
-  btn.disabled = true;
-  btn.textContent = "Generando PDF...";
-  status.textContent = "";
+  if (btn) { btn.disabled = true; btn.textContent = isMobile ? "Guardando..." : "Generando PDF..."; }
+  if (status) status.textContent = "";
 
   try {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210, MAR = 18;
-    let y = 18;
+    let fileName = `cotizacion_spectra_${new Date().toISOString().slice(0,10)}.pdf`;
+    let pdfBase64 = "";
 
-    const RED    = [200, 21, 42];
-    const DARK   = [26, 26, 24];
-    const MUTED  = [120, 120, 120];
-    const LGRAY  = [240, 240, 238];
-    const WHITE  = [255, 255, 255];
+    if (!isMobile) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const W = 210, H = 297, MAR = 18, PAGE_BOTTOM = 280;
+      let y = 18;
 
-    // ── Header bar ──
-    doc.setFillColor(...RED);
-    doc.rect(0, 0, W, 28, "F");
-    doc.setTextColor(...WHITE);
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("SPECTRA", MAR, 13);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text("Optimizador Arquitectónico", MAR, 20);
+      const RED    = [200, 21, 42];
+      const DARK   = [26, 26, 24];
+      const MUTED  = [120, 120, 120];
+      const LGRAY  = [240, 240, 238];
+      const WHITE  = [255, 255, 255];
 
-    // Date top right
-    const now     = new Date();
-    const dateStr = now.toLocaleDateString("es-CO", { day:"2-digit", month:"short", year:"numeric" });
-    const timeStr = now.toLocaleTimeString("es-CO", { hour:"2-digit", minute:"2-digit" });
-    doc.setFontSize(8);
-    doc.text(`${dateStr}  ${timeStr}`, W - MAR, 13, { align: "right" });
-    doc.text("Cotización de corte", W - MAR, 20, { align: "right" });
+      const now     = new Date();
+      const dateStr = now.toLocaleDateString("es-CO", { day:"2-digit", month:"short", year:"numeric" });
+      const timeStr = now.toLocaleTimeString("es-CO", { hour:"2-digit", minute:"2-digit" });
 
-    y = 38;
-
-    // ── Results summary: 2 boxes ──
-    const r152 = allResults.find(r => r.rollWidth === 1.52);
-    const r182 = allResults.find(r => r.rollWidth === 1.82);
-    const minLM = Math.min(...allResults.map(r => r.linearMeters));
-    const BOX_W = (W - MAR*2 - 6) / 2;
-
-    allResults.forEach((r, i) => {
-      const bx = MAR + i * (BOX_W + 6);
-      const isWinner = r.linearMeters === minLM;
-      doc.setFillColor(...(isWinner ? RED : LGRAY));
-      doc.roundedRect(bx, y, BOX_W, 28, 3, 3, "F");
-      doc.setTextColor(...(isWinner ? WHITE : MUTED));
-      doc.setFontSize(8);
+      doc.setFillColor(...RED);
+      doc.rect(0, 0, W, 28, "F");
+      doc.setTextColor(...WHITE);
+      doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
-      doc.text(`ROLLO ${r.rollWidth} m${isWinner ? "  ✓ MEJOR" : ""}`, bx + 5, y + 8);
-      doc.setTextColor(...(isWinner ? WHITE : DARK));
-      doc.setFontSize(20);
-      doc.setFont("helvetica", "bold");
-      doc.text(`${r.linearMeters.toFixed(2)}`, bx + 5, y + 21);
-      doc.setFontSize(8);
+      doc.text("SPECTRA", MAR, 13);
+      doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text("m lineales", bx + 5 + doc.getTextWidth(`${r.linearMeters.toFixed(2)}`) + 2, y + 21);
-    });
+      doc.text("Optimizador Arquitectónico", MAR, 20);
+      doc.setFontSize(8);
+      doc.text(`${dateStr}  ${timeStr}`, W - MAR, 13, { align: "right" });
+      doc.text("Cotización de corte", W - MAR, 20, { align: "right" });
 
-    y += 34;
+      doc.setFillColor(...LGRAY);
+      doc.rect(0, 28, W, 12, "F");
+      doc.setTextColor(...MUTED);
+      doc.setFontSize(8);
+      const identLine = `Elaborado por: ${identity.nombre || "—"}   ·   Cédula: ${identity.cedula || "—"}   ·   Tel: ${identity.telefono || "—"}`;
+      const identLines = doc.splitTextToSize(identLine, W - MAR*2);
+      doc.text(identLines, MAR, 35);
+      y = 46;
 
-    // Area total pill
-    doc.setFillColor(...LGRAY);
-    doc.roundedRect(MAR, y, W - MAR*2, 12, 2, 2, "F");
-    doc.setTextColor(...MUTED);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    doc.text("ÁREA TOTAL DE CORTES", MAR + 4, y + 8);
-    doc.setTextColor(...DARK);
-    doc.text(`${origArea.toFixed(3)} m²`, W - MAR - 4, y + 8, { align: "right" });
-    y += 18;
+      const minLM = Math.min(...allResults.map(r => r.linearMeters));
+      const BOX_W = (W - MAR*2 - 6) / Math.max(allResults.length, 2);
+      allResults.forEach((r, i) => {
+        const bx = MAR + i * (BOX_W + 6);
+        const isWinner = r.linearMeters === minLM;
+        doc.setFillColor(...(isWinner ? RED : LGRAY));
+        doc.roundedRect(bx, y, BOX_W, 28, 3, 3, "F");
+        doc.setTextColor(...(isWinner ? WHITE : MUTED));
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.text(`ROLLO ${r.rollWidth} m${isWinner ? "  ✓ MEJOR" : ""}`, bx + 5, y + 8);
+        doc.setTextColor(...(isWinner ? WHITE : DARK));
+        doc.setFontSize(20);
+        doc.text(`${r.linearMeters.toFixed(2)}`, bx + 5, y + 21);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.text("m lineales", bx + 5 + doc.getTextWidth(`${r.linearMeters.toFixed(2)}`) + 2, y + 21);
+      });
+      y += 34;
 
-    // ── Cuts table ──
-    doc.setFillColor(...RED);
-    doc.rect(MAR, y, W - MAR*2, 8, "F");
-    doc.setTextColor(...WHITE);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    const cols = [MAR+3, MAR+52, MAR+74, MAR+100, MAR+130];
-    doc.text("MEDIDA",       cols[0], y + 5.5);
-    doc.text("CANT.",        cols[1], y + 5.5);
-    doc.text("ÁREA UNIT.",   cols[2], y + 5.5);
-    doc.text("ÁREA TOTAL",   cols[3], y + 5.5);
-    doc.text("% DEL TOTAL",  cols[4], y + 5.5);
-    y += 8;
-
-    pieces.forEach((p, idx) => {
-      const unit  = p.width * p.height;
-      const total = unit * p.amount;
-      const pct   = origArea > 0 ? (total / origArea * 100).toFixed(1) : "0.0";
-      doc.setFillColor(...(idx % 2 === 0 ? WHITE : [248, 248, 246]));
-      doc.rect(MAR, y, W - MAR*2, 8, "F");
+      doc.setFillColor(...LGRAY);
+      doc.roundedRect(MAR, y, W - MAR*2, 12, 2, 2, "F");
+      doc.setTextColor(...MUTED);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text("ÁREA TOTAL DE CORTES", MAR + 4, y + 8);
       doc.setTextColor(...DARK);
+      doc.text(`${origArea.toFixed(3)} m²`, W - MAR - 4, y + 8, { align: "right" });
+      y += 18;
+
+      const drawCutsHeader = () => {
+        doc.setFillColor(...RED);
+        doc.rect(MAR, y, W - MAR*2, 8, "F");
+        doc.setTextColor(...WHITE);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        const cols = [MAR+3, MAR+52, MAR+74, MAR+100, MAR+130];
+        doc.text("MEDIDA", cols[0], y + 5.5);
+        doc.text("CANT.", cols[1], y + 5.5);
+        doc.text("ÁREA UNIT.", cols[2], y + 5.5);
+        doc.text("ÁREA TOTAL", cols[3], y + 5.5);
+        doc.text("% DEL TOTAL", cols[4], y + 5.5);
+        y += 8;
+        return cols;
+      };
+      let cols = drawCutsHeader();
+      pieces.forEach((p, idx) => {
+        if (y + 8 > PAGE_BOTTOM) { doc.addPage(); y = 18; cols = drawCutsHeader(); }
+        const unit  = p.width * p.height;
+        const total = unit * p.amount;
+        const pct   = origArea > 0 ? (total / origArea * 100).toFixed(1) : "0.0";
+        doc.setFillColor(...(idx % 2 === 0 ? WHITE : [248, 248, 246]));
+        doc.rect(MAR, y, W - MAR*2, 8, "F");
+        doc.setTextColor(...DARK);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.text(`${p.width.toFixed(2)} × ${p.height.toFixed(2)} m`, cols[0], y + 5.5);
+        doc.text(`${p.amount}`, cols[1], y + 5.5);
+        doc.text(`${unit.toFixed(3)} m²`, cols[2], y + 5.5);
+        doc.text(`${total.toFixed(3)} m²`, cols[3], y + 5.5);
+        doc.text(`${pct}%`, cols[4], y + 5.5);
+        y += 8;
+      });
+      if (y + 8 > PAGE_BOTTOM) { doc.addPage(); y = 18; cols = drawCutsHeader(); }
+      doc.setFillColor(...LGRAY);
+      doc.rect(MAR, y, W - MAR*2, 8, "F");
+      doc.setTextColor(...RED);
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.text(`${p.width.toFixed(2)} × ${p.height.toFixed(2)} m`, cols[0], y + 5.5);
-      doc.text(`${p.amount}`,                  cols[1], y + 5.5);
-      doc.text(`${unit.toFixed(3)} m²`,         cols[2], y + 5.5);
-      doc.text(`${total.toFixed(3)} m²`,        cols[3], y + 5.5);
-      doc.text(`${pct}%`,                       cols[4], y + 5.5);
-      y += 8;
-    });
+      doc.text("TOTAL", cols[0], y + 5.5);
+      doc.text(`${origArea.toFixed(3)} m²`, cols[3], y + 5.5);
+      doc.text("100%", cols[4], y + 5.5);
+      y += 14;
 
-    // Total row
-    doc.setFillColor(...LGRAY);
-    doc.rect(MAR, y, W - MAR*2, 8, "F");
-    doc.setTextColor(...RED);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("TOTAL", cols[0], y + 5.5);
-    doc.text(`${origArea.toFixed(3)} m²`, cols[3], y + 5.5);
-    doc.text("100%", cols[4], y + 5.5);
-    y += 14;
+      for (const r of allResults) {
+        const tmpDiv = document.createElement("div");
+        tmpDiv.style.cssText = "position:absolute;left:-9999px;top:0;background:white;width:659px;overflow:hidden;";
+        document.body.appendChild(tmpDiv);
+        drawSVG(r, r.rollWidth, tmpDiv);
+        const svgEl = tmpDiv.querySelector("svg");
+        if (svgEl) {
+          svgEl.setAttribute("width", "659");
+          svgEl.style.width = "659px";
+          svgEl.style.height = "auto";
+          const svgData = new XMLSerializer().serializeToString(svgEl);
+          const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+          const url = URL.createObjectURL(svgBlob);
+          await new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              const fixedW = 659;
+              const ratio  = img.naturalHeight > 0 ? img.naturalHeight / img.naturalWidth : 1;
+              const fixedH = Math.round(fixedW * ratio);
+              const canvas = document.createElement("canvas");
+              canvas.width  = fixedW * 2;
+              canvas.height = fixedH * 2;
+              const ctx = canvas.getContext("2d");
+              ctx.scale(2, 2);
+              ctx.fillStyle = "white";
+              ctx.fillRect(0, 0, fixedW, fixedH);
+              ctx.drawImage(img, 0, 0, fixedW, fixedH);
+              URL.revokeObjectURL(url);
 
-    // ── SVG planos de corte ──
-    for (const r of allResults) {
-      // Render SVG to canvas via temporary DOM element
-      const tmpDiv = document.createElement("div");
-      // Fix width to exactly A4 content width in px (174mm at 96dpi ≈ 659px)
-      tmpDiv.style.cssText = "position:absolute;left:-9999px;top:0;background:white;width:659px;overflow:hidden;";
-      document.body.appendChild(tmpDiv);
-      drawSVG(r, r.rollWidth, tmpDiv);
-      const svgEl = tmpDiv.querySelector("svg");
-      // Force SVG to fit within 659px
-      if (svgEl) {
-        svgEl.setAttribute("width", "659");
-        svgEl.style.width = "659px";
-        svgEl.style.height = "auto";
+              const imgData = canvas.toDataURL("image/png");
+              const maxW = W - MAR*2;
+              const maxH = 210;
+              let imgW = maxW;
+              let imgH = imgW * (fixedH / fixedW);
+              if (imgH > maxH) {
+                imgH = maxH;
+                imgW = imgH * (fixedW / fixedH);
+              }
+
+              if (y + imgH + 20 > PAGE_BOTTOM) { doc.addPage(); y = 18; }
+              doc.setFillColor(...LGRAY);
+              doc.roundedRect(MAR, y, W - MAR*2, 8, 2, 2, "F");
+              doc.setTextColor(...MUTED);
+              doc.setFont("helvetica", "bold");
+              doc.setFontSize(7);
+              doc.text(`PLANO DE CORTE — ROLLO ${r.rollWidth} m`, MAR + 4, y + 5.5);
+              y += 10;
+              const centeredX = MAR + ((maxW - imgW) / 2);
+              doc.addImage(imgData, "PNG", centeredX, y, imgW, imgH);
+              y += imgH + 10;
+              resolve();
+            };
+            img.src = url;
+          });
+        }
+        document.body.removeChild(tmpDiv);
       }
 
-      if (svgEl) {
-        // Convert SVG to PNG via canvas
-        const svgData = new XMLSerializer().serializeToString(svgEl);
-        const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-        const url = URL.createObjectURL(svgBlob);
-
-        await new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            // Use fixed width of 659px (A4 content area)
-            const fixedW = 659;
-            const ratio  = img.naturalHeight > 0 ? img.naturalHeight / img.naturalWidth : 1;
-            const fixedH = Math.round(fixedW * ratio);
-            const canvas = document.createElement("canvas");
-            canvas.width  = fixedW * 2;
-            canvas.height = fixedH * 2;
-            const ctx = canvas.getContext("2d");
-            ctx.scale(2, 2);
-            ctx.fillStyle = "white";
-            ctx.fillRect(0, 0, fixedW, fixedH);
-            ctx.drawImage(img, 0, 0, fixedW, fixedH);
-            URL.revokeObjectURL(url);
-
-            const imgData = canvas.toDataURL("image/png");
-            const imgW = W - MAR*2;
-            const imgH = imgW * (fixedH / fixedW);
-
-            // Check if need new page
-            if (y + imgH + 20 > 280) { doc.addPage(); y = 18; }
-
-            // Section label
-            doc.setFillColor(...LGRAY);
-            doc.roundedRect(MAR, y, W - MAR*2, 8, 2, 2, "F");
-            doc.setTextColor(...MUTED);
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(7);
-            doc.text(`PLANO DE CORTE — ROLLO ${r.rollWidth} m`, MAR + 4, y + 5.5);
-            y += 10;
-
-            doc.addImage(imgData, "PNG", MAR, y, imgW, imgH);
-            y += imgH + 10;
-            resolve();
-          };
-          img.src = url;
+      const warnEntries = Object.values(warnMap || {});
+      if (warnEntries.length) {
+        const warningLines = [];
+        warnEntries.forEach(({ ow, oh, qty, rollos }) => {
+          const totalRolls  = allResults.length;
+          const affectedAll = rollos.length === totalRolls;
+          const rollosStr   = rollos.map(rw => `${rw} m`).join(" y ");
+          const enRollos    = affectedAll ? "en todos los anchos" : `solo en rollo ${rollosStr}`;
+          warningLines.push(`⚠ ${ow} × ${oh} m, cant. ${qty} — requiere empate ${enRollos}. Calcular manualmente.`);
         });
-      }
-      document.body.removeChild(tmpDiv);
-    }
-
-    // ── Empate warnings ──
-    const warnEntries = Object.values(warnMap || {});
-    if (warnEntries.length) {
-      if (y + warnEntries.length * 10 + 16 > 280) { doc.addPage(); y = 18; }
-      doc.setFillColor(255, 243, 205);
-      doc.roundedRect(MAR, y, W - MAR*2, warnEntries.length * 10 + 12, 3, 3, "F");
-      doc.setDrawColor(253, 211, 77);
-      doc.roundedRect(MAR, y, W - MAR*2, warnEntries.length * 10 + 12, 3, 3, "S");
-      y += 8;
-      warnEntries.forEach(({ ow, oh, qty, rollos }) => {
-        const totalRolls  = allResults.length;
-        const affectedAll = rollos.length === totalRolls;
-        const rollosStr   = rollos.map(rw => `${rw} m`).join(" y ");
-        const enRollos    = affectedAll ? "en ambos anchos" : `solo en rollo ${rollosStr}`;
+        const wrapped = warningLines.flatMap(line => doc.splitTextToSize(line, W - MAR*2 - 8));
+        const boxH = wrapped.length * 5 + 12;
+        if (y + boxH > PAGE_BOTTOM) { doc.addPage(); y = 18; }
+        doc.setFillColor(255, 243, 205);
+        doc.roundedRect(MAR, y, W - MAR*2, boxH, 3, 3, "F");
+        doc.setDrawColor(253, 211, 77);
+        doc.roundedRect(MAR, y, W - MAR*2, boxH, 3, 3, "S");
+        y += 8;
         doc.setTextColor(146, 64, 14);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
-        doc.text(`⚠  ${ow} × ${oh} m, cant. ${qty} — requiere empate ${enRollos}. Calcular manualmente.`, MAR + 4, y);
-        y += 10;
-      });
-      y += 6;
+        doc.text(wrapped, MAR + 4, y);
+        y += boxH;
+      }
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFillColor(...LGRAY);
+        doc.rect(0, 287, W, 10, "F");
+        doc.setTextColor(...MUTED);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.text("Spectra · Optimizador Arquitectónico", MAR, 293);
+        doc.text(`Página ${i} de ${pageCount}`, W - MAR, 293, { align: "right" });
+      }
+
+      doc.save(fileName);
+      pdfBase64 = doc.output("datauristring").split(",")[1];
     }
 
-    // ── Footer ──
-    const pageCount = doc.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFillColor(...LGRAY);
-      doc.rect(0, 287, W, 10, "F");
-      doc.setTextColor(...MUTED);
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.text("Spectra · Optimizador Arquitectónico", MAR, 293);
-      doc.text(`Página ${i} de ${pageCount}`, W - MAR, 293, { align: "right" });
+    if (btn) btn.textContent = "Guardando...";
+    const saveResult = await sendPDFToAirtable(identity, pdfBase64, fileName, pieces, allResults, origArea);
+    if (!saveResult.ok) throw new Error(saveResult.error || "No se pudo guardar la información.");
+
+    if (btn) { btn.disabled = false; btn.textContent = "⬇ Guardar"; }
+    if (status) {
+      status.style.color = "var(--accent)";
+      status.textContent = isMobile ? "✓ Datos guardados correctamente" : `✓ PDF descargado y datos guardados (${fileName})`;
+      setTimeout(() => { status.textContent = ""; }, 5000);
     }
-
-    // ── Download PDF locally ──
-    const fileName = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
-    doc.save(fileName);
-
-    // ── Get base64 and send to Make ──
-    const pdfBase64 = doc.output("datauristring").split(",")[1];
-
-    btn.textContent = "Guardando en Airtable...";
-    await sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea);
-
-    btn.disabled = false;
-    btn.textContent = "⬇ Guardar";
-    status.style.color = "var(--accent)";
-    status.textContent = "✓ PDF descargado y guardado en Airtable";
-    setTimeout(() => { status.textContent = ""; }, 4000);
-
+    return { ok:true, fileName };
   } catch (err) {
     console.error(err);
-    btn.disabled = false;
-    btn.textContent = "⬇ Guardar";
-    status.style.color = "#dc2626";
-    status.textContent = "Error al generar el PDF. Revisa la consola.";
+    if (btn) { btn.disabled = false; btn.textContent = "⬇ Guardar"; }
+    if (status) {
+      status.style.color = "#dc2626";
+      status.textContent = `Error: ${err.message || "Revisa la consola."}`;
+    }
+    return { ok:false, error: err.message || String(err) };
   }
 }
 
-async function sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea) {
+async function sendPDFToAirtable(identity, pdfBase64, fileName, pieces, allResults, origArea) {
   const webhookUrl = "https://hook.us2.make.com/b45r4e43quv8orbnpfzl9vhuxhiw6mxv";
-  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") return;
+  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") {
+    return { ok:false, error:"No está configurado el webhook de Make/Airtable." };
+  }
 
-  const r152 = allResults.find(r => r.rollWidth === 1.52);
-  const r182 = allResults.find(r => r.rollWidth === 1.82);
-  const warnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
+  try {
+    const warnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
+    const payload = {
+      fecha: new Date().toISOString(),
+      nombre_archivo: fileName,
+      nombre: identity?.nombre || "",
+      cedula: identity?.cedula || "",
+      telefono: identity?.telefono || "",
+      medidas: pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
+      area_total_m2: parseFloat(origArea.toFixed(3)),
+      advertencias: warnings.join(" | ") || "",
+      rollos: allResults.map(r => ({ ancho: r.rollWidth, metros_lineales: parseFloat(r.linearMeters.toFixed(2)) })),
+      pdf_base64: pdfBase64 || ""
+    };
 
-  const payload = {
-    fecha:          new Date().toISOString(),
-    nombre_archivo: fileName,
-    nombre:         identity ? identity.nombre : "",
-    cedula:         identity ? identity.cedula  : "",
-    medidas:        pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
-    metros_152:     r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
-    metros_182:     r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
-    area_total_m2:  parseFloat(origArea.toFixed(3)),
-    advertencias:   warnings.join(" | ") || "",
-    pdf_base64:     pdfBase64
-  };
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
-  await fetch(webhookUrl, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify(payload)
-  });
+    if (!response.ok) {
+      throw new Error(`Error enviando a Make/Airtable: ${response.status}`);
+    }
+    return { ok:true };
+  } catch (err) {
+    console.error("[sendPDFToAirtable]", err);
+    return { ok:false, error: err.message || String(err) };
+  }
 }
 
 document.getElementById("addRoll").addEventListener("click",  () => addRollRow());
