@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,7 +7,6 @@
   <title>Optimizador Arquitectónico — Spectra</title>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -443,7 +443,6 @@
     <h1>Optimizador <span>Arquitectónico</span></h1>
     <p>Introduce las medidas que necesitas. Ten en cuenta que si el vidrio lleva empate lo deberás calcular manualmente, ya que el optimizador no tiene esta función.</p>
   </div>
-  <a href="agente.html" style="margin-left:auto;flex-shrink:0;background:var(--accent);color:#fff;text-decoration:none;border-radius:8px;padding:10px 18px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;display:flex;align-items:center;gap:7px;transition:background 0.15s;" onmouseover="this.style.background='var(--accent-h)'" onmouseout="this.style.background='var(--accent)'">🤖 Agente IA</a>
 </div>
 
 <div class="wrap">
@@ -1084,17 +1083,31 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
 
   // ── Agrupar warnings por pieza, indicando en qué rollos ocurre ──
   // Estructura: { "ow×oh": { ow, oh, qty, rollos: [1.52, 1.82] } }
+  const EPS = 0.001;
   const warnMap = {};
+  const almostEqual = (a, b) => Math.abs(a - b) < EPS;
+
+  function findOriginalPiece(pw, ph) {
+    return pieces.find(p => {
+      const matchWithGarbage =
+        almostEqual(p.width + garbageW, pw) &&
+        almostEqual(p.height, ph);
+
+      const rawMatch =
+        almostEqual(p.width, pw) &&
+        almostEqual(p.height, ph);
+
+      return matchWithGarbage || rawMatch;
+    });
+  }
+
   allResults.forEach(r => {
     (r.warnings || []).forEach(w => {
       const match = w.match(/Pieza ([\d.]+)×([\d.]+)/);
       if (!match) return;
       const pw  = parseFloat(match[1]);
       const ph  = parseFloat(match[2]);
-      const orig = pieces.find(p =>
-        Math.abs((p.width + garbageW) - pw) < 0.001 ||
-        Math.abs(p.width - pw) < 0.001
-      );
+      const orig = findOriginalPiece(pw, ph);
       const key = `${orig ? orig.width : pw}×${orig ? orig.height : ph}`;
       if (!warnMap[key]) {
         warnMap[key] = {
@@ -1134,7 +1147,7 @@ function renderResults(allResults, pieces, prices, garbageW, garbageH) {
     const isWinner = r.linearMeters === minLM;
     const isTied = allResults.filter(x => x.linearMeters === minLM).length > 1;
     const cls = isTied ? "tied" : isWinner ? "winner" : "loser";
-    const badge = (!isTied && isWinner) ? `<span class="badge badge-win">✓ Mejor</span>` : "";
+    const badge = isTied ? `<span class="badge badge-tie">Empate</span>` : isWinner ? `<span class="badge badge-win">✓ Mejor</span>` : "";
     const cvId = `cv_${r.rollWidth.toString().replace(".","_")}`;
 
     html += `
@@ -1312,143 +1325,16 @@ document.getElementById("optimizeBtn").addEventListener("click", () => {
   }
 });
 
-// ─── MODAL DE IDENTIDAD ──────────────────────────────────────────────────────
-
-function showIdentityModal() {
-  return new Promise(resolve => {
-    const old = document.getElementById("__idModal");
-    if (old) old.remove();
-
-    const overlay = document.createElement("div");
-    overlay.id = "__idModal";
-    overlay.style.cssText = [
-      "position:fixed","inset:0","background:rgba(0,0,0,0.5)",
-      "display:flex","align-items:center","justify-content:center","z-index:9999"
-    ].join(";");
-
-    overlay.innerHTML = `
-      <div style="background:#fff;border:1px solid #e8e8e4;border-radius:14px;
-                  padding:32px 28px 24px;width:100%;max-width:380px;
-                  box-shadow:0 20px 60px rgba(0,0,0,0.15);">
-        <div style="font-family:'Unbounded',sans-serif;font-size:14px;font-weight:700;
-                    color:#1a1a18;margin-bottom:6px;">
-          ¿Quién realiza esta cotización?
-        </div>
-        <div style="font-size:12px;color:#888880;margin-bottom:22px;line-height:1.5;">
-          Estos datos quedarán en el PDF y en el registro enviado al equipo.
-        </div>
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:11px;font-weight:600;color:#888880;
-                        margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">
-            Nombre completo *
-          </label>
-          <input id="__idNombre" type="text" placeholder="Ej: Juan Pérez"
-            style="width:100%;background:#f7f7f5;border:1px solid #e8e8e4;color:#1a1a18;
-                   padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:14px;
-                   border-radius:8px;outline:none;box-sizing:border-box;">
-        </div>
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:11px;font-weight:600;color:#888880;
-                        margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">
-            Cédula (opcional)
-          </label>
-          <input id="__idCedula" type="text" placeholder="Ej: 1234567890"
-            style="width:100%;background:#f7f7f5;border:1px solid #e8e8e4;color:#1a1a18;
-                   padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:14px;
-                   border-radius:8px;outline:none;box-sizing:border-box;">
-        </div>
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:11px;font-weight:600;color:#888880;
-                        margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">
-            Teléfono (opcional)
-          </label>
-          <input id="__idTelefono" type="tel" placeholder="Ej: 3001234567"
-            style="width:100%;background:#f7f7f5;border:1px solid #e8e8e4;color:#1a1a18;
-                   padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:14px;
-                   border-radius:8px;outline:none;box-sizing:border-box;">
-        </div>
-        <div style="display:flex;gap:10px;margin-top:24px;">
-          <button id="__idCancel"
-            style="flex:1;background:transparent;border:1px solid #e8e8e4;border-radius:8px;
-                   padding:11px 0;font-family:'DM Sans',sans-serif;font-size:13px;
-                   font-weight:600;color:#888880;cursor:pointer;">
-            Cancelar
-          </button>
-          <button id="__idConfirm"
-            style="flex:2;background:#c8152a;border:none;border-radius:8px;padding:11px 0;
-                   font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;
-                   color:white;cursor:pointer;">
-            Generar y guardar
-          </button>
-        </div>
-      </div>`;
-
-    document.body.appendChild(overlay);
-    setTimeout(() => document.getElementById("__idNombre").focus(), 80);
-
-    function confirm() {
-      const nombre = document.getElementById("__idNombre").value.trim();
-      const cedula = document.getElementById("__idCedula").value.trim();
-      if (!nombre) {
-        document.getElementById("__idNombre").style.borderColor = "#c8152a";
-        document.getElementById("__idNombre").focus();
-        return;
-      }
-      overlay.remove();
-      const telefono = document.getElementById("__idTelefono").value.trim();
-      resolve({ nombre, cedula: cedula || "—", telefono: telefono || "—" });
-    }
-
-    function cancel() { overlay.remove(); resolve(null); }
-
-    document.getElementById("__idConfirm").addEventListener("click", confirm);
-    document.getElementById("__idCancel").addEventListener("click", cancel);
-    overlay.addEventListener("click", e => { if (e.target === overlay) cancel(); });
-    overlay.addEventListener("keydown", e => {
-      if (e.key === "Enter")  confirm();
-      if (e.key === "Escape") cancel();
-    });
-  });
-}
-
-// ─── GENERAR PDF Y ENVIAR ─────────────────────────────────────────────────────
-
-function generateAndSendPDF() {
-  showIdentityModal().then(identity => {
-    if (!identity) return;
-    _doPDF(identity);
-  });
-}
-
-async function _doPDF(identity) {
+async function generateAndSendPDF() {
   const state = window._lastRenderState;
   if (!state) return;
-  const { allResults, pieces, warnMap, origArea } = state;
+  const { allResults, pieces, garbageW, garbageH, warnMap, origArea } = state;
 
-  const btn    = document.getElementById("pdfBtn");
+  const btn = document.getElementById("pdfBtn");
   const status = document.getElementById("pdfStatus");
-  btn.disabled    = true;
-  btn.textContent = "Enviando...";
+  btn.disabled = true;
+  btn.textContent = "Generando PDF...";
   status.textContent = "";
-
-  // En móvil omitir generación de PDF — solo enviar datos
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  if (isMobile) {
-    try {
-      await _sendByEmail(identity, pieces, allResults, origArea, "", "sin_pdf_movil.pdf");
-      btn.disabled    = false;
-      btn.textContent = "⬇ Guardar";
-      status.style.color = "var(--accent)";
-      status.textContent = "✓ Datos enviados correctamente";
-      setTimeout(() => { status.textContent = ""; }, 5000);
-    } catch(e) {
-      btn.disabled    = false;
-      btn.textContent = "⬇ Guardar";
-      status.style.color = "#dc2626";
-      status.textContent = "Error al enviar. Intenta desde un computador.";
-    }
-    return;
-  }
 
   try {
     const { jsPDF } = window.jspdf;
@@ -1456,13 +1342,13 @@ async function _doPDF(identity) {
     const W = 210, MAR = 18;
     let y = 18;
 
-    const RED   = [200, 21, 42];
-    const DARK  = [26, 26, 24];
-    const MUTED = [120, 120, 120];
-    const LGRAY = [240, 240, 238];
-    const WHITE = [255, 255, 255];
+    const RED    = [200, 21, 42];
+    const DARK   = [26, 26, 24];
+    const MUTED  = [120, 120, 120];
+    const LGRAY  = [240, 240, 238];
+    const WHITE  = [255, 255, 255];
 
-    // ── Header ──
+    // ── Header bar ──
     doc.setFillColor(...RED);
     doc.rect(0, 0, W, 28, "F");
     doc.setTextColor(...WHITE);
@@ -1473,6 +1359,7 @@ async function _doPDF(identity) {
     doc.setFont("helvetica", "normal");
     doc.text("Optimizador Arquitectónico", MAR, 20);
 
+    // Date top right
     const now     = new Date();
     const dateStr = now.toLocaleDateString("es-CO", { day:"2-digit", month:"short", year:"numeric" });
     const timeStr = now.toLocaleTimeString("es-CO", { hour:"2-digit", minute:"2-digit" });
@@ -1480,24 +1367,16 @@ async function _doPDF(identity) {
     doc.text(`${dateStr}  ${timeStr}`, W - MAR, 13, { align: "right" });
     doc.text("Cotización de corte", W - MAR, 20, { align: "right" });
 
-    // Identity bar
-    doc.setFillColor(...LGRAY);
-    doc.rect(0, 28, W, 10, "F");
-    doc.setTextColor(...MUTED);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Elaborado por: ${identity.nombre}   ·   Cédula: ${identity.cedula}   ·   Tel: ${identity.telefono}`, MAR, 35);
+    y = 38;
 
-    y = 44;
-
-    // ── Result boxes ──
-    const r152  = allResults.find(r => r.rollWidth === 1.52);
-    const r182  = allResults.find(r => r.rollWidth === 1.82);
+    // ── Results summary: 2 boxes ──
+    const r152 = allResults.find(r => r.rollWidth === 1.52);
+    const r182 = allResults.find(r => r.rollWidth === 1.82);
     const minLM = Math.min(...allResults.map(r => r.linearMeters));
     const BOX_W = (W - MAR*2 - 6) / 2;
 
     allResults.forEach((r, i) => {
-      const bx       = MAR + i * (BOX_W + 6);
+      const bx = MAR + i * (BOX_W + 6);
       const isWinner = r.linearMeters === minLM;
       doc.setFillColor(...(isWinner ? RED : LGRAY));
       doc.roundedRect(bx, y, BOX_W, 28, 3, 3, "F");
@@ -1516,12 +1395,12 @@ async function _doPDF(identity) {
 
     y += 34;
 
-    // Area pill
+    // Area total pill
     doc.setFillColor(...LGRAY);
     doc.roundedRect(MAR, y, W - MAR*2, 12, 2, 2, "F");
     doc.setTextColor(...MUTED);
-    doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
     doc.text("ÁREA TOTAL DE CORTES", MAR + 4, y + 8);
     doc.setTextColor(...DARK);
     doc.text(`${origArea.toFixed(3)} m²`, W - MAR - 4, y + 8, { align: "right" });
@@ -1534,123 +1413,132 @@ async function _doPDF(identity) {
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
     const cols = [MAR+3, MAR+52, MAR+74, MAR+100, MAR+130];
-    doc.text("MEDIDA",      cols[0], y+5.5);
-    doc.text("CANT.",       cols[1], y+5.5);
-    doc.text("ÁREA UNIT.",  cols[2], y+5.5);
-    doc.text("ÁREA TOTAL",  cols[3], y+5.5);
-    doc.text("% DEL TOTAL", cols[4], y+5.5);
+    doc.text("MEDIDA",       cols[0], y + 5.5);
+    doc.text("CANT.",        cols[1], y + 5.5);
+    doc.text("ÁREA UNIT.",   cols[2], y + 5.5);
+    doc.text("ÁREA TOTAL",   cols[3], y + 5.5);
+    doc.text("% DEL TOTAL",  cols[4], y + 5.5);
     y += 8;
 
     pieces.forEach((p, idx) => {
       const unit  = p.width * p.height;
       const total = unit * p.amount;
       const pct   = origArea > 0 ? (total / origArea * 100).toFixed(1) : "0.0";
-      doc.setFillColor(...(idx % 2 === 0 ? WHITE : [248,248,246]));
+      doc.setFillColor(...(idx % 2 === 0 ? WHITE : [248, 248, 246]));
       doc.rect(MAR, y, W - MAR*2, 8, "F");
       doc.setTextColor(...DARK);
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
-      doc.text(`${p.width.toFixed(2)} × ${p.height.toFixed(2)} m`, cols[0], y+5.5);
-      doc.text(`${p.amount}`,           cols[1], y+5.5);
-      doc.text(`${unit.toFixed(3)} m²`, cols[2], y+5.5);
-      doc.text(`${total.toFixed(3)} m²`,cols[3], y+5.5);
-      doc.text(`${pct}%`,               cols[4], y+5.5);
+      doc.text(`${p.width.toFixed(2)} × ${p.height.toFixed(2)} m`, cols[0], y + 5.5);
+      doc.text(`${p.amount}`,                  cols[1], y + 5.5);
+      doc.text(`${unit.toFixed(3)} m²`,         cols[2], y + 5.5);
+      doc.text(`${total.toFixed(3)} m²`,        cols[3], y + 5.5);
+      doc.text(`${pct}%`,                       cols[4], y + 5.5);
       y += 8;
     });
 
+    // Total row
     doc.setFillColor(...LGRAY);
     doc.rect(MAR, y, W - MAR*2, 8, "F");
     doc.setTextColor(...RED);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("TOTAL", cols[0], y+5.5);
-    doc.text(`${origArea.toFixed(3)} m²`, cols[3], y+5.5);
-    doc.text("100%", cols[4], y+5.5);
+    doc.text("TOTAL", cols[0], y + 5.5);
+    doc.text(`${origArea.toFixed(3)} m²`, cols[3], y + 5.5);
+    doc.text("100%", cols[4], y + 5.5);
     y += 14;
 
-    // ── SVG planos ──
+    // ── SVG planos de corte ──
     for (const r of allResults) {
+      // Render SVG to canvas via temporary DOM element
       const tmpDiv = document.createElement("div");
+      // Fix width to exactly A4 content width in px (174mm at 96dpi ≈ 659px)
       tmpDiv.style.cssText = "position:absolute;left:-9999px;top:0;background:white;width:659px;overflow:hidden;";
       document.body.appendChild(tmpDiv);
       drawSVG(r, r.rollWidth, tmpDiv);
       const svgEl = tmpDiv.querySelector("svg");
+      // Force SVG to fit within 659px
+      if (svgEl) {
+        svgEl.setAttribute("width", "659");
+        svgEl.style.width = "659px";
+        svgEl.style.height = "auto";
+      }
 
       if (svgEl) {
-        svgEl.setAttribute("width",  "659");
-        svgEl.setAttribute("height", svgEl.getAttribute("height") || "400");
-        svgEl.style.width  = "659px";
-        svgEl.style.height = "auto";
-
+        // Convert SVG to PNG via canvas
         const svgData = new XMLSerializer().serializeToString(svgEl);
         const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-        const url     = URL.createObjectURL(svgBlob);
+        const url = URL.createObjectURL(svgBlob);
 
-        await new Promise(resolve => {
+        await new Promise((resolve) => {
           const img = new Image();
           img.onload = () => {
-            const fixW  = 659;
-            const ratio = img.naturalHeight > 0 ? img.naturalHeight / img.naturalWidth : 1;
-            const fixH  = Math.round(fixW * ratio);
-            const cv    = document.createElement("canvas");
-            cv.width  = fixW * 2;
-            cv.height = fixH * 2;
-            const ctx = cv.getContext("2d");
+            // Use fixed width of 659px (A4 content area)
+            const fixedW = 659;
+            const ratio  = img.naturalHeight > 0 ? img.naturalHeight / img.naturalWidth : 1;
+            const fixedH = Math.round(fixedW * ratio);
+            const canvas = document.createElement("canvas");
+            canvas.width  = fixedW * 2;
+            canvas.height = fixedH * 2;
+            const ctx = canvas.getContext("2d");
             ctx.scale(2, 2);
             ctx.fillStyle = "white";
-            ctx.fillRect(0, 0, fixW, fixH);
-            ctx.drawImage(img, 0, 0, fixW, fixH);
+            ctx.fillRect(0, 0, fixedW, fixedH);
+            ctx.drawImage(img, 0, 0, fixedW, fixedH);
             URL.revokeObjectURL(url);
 
-            const imgData = cv.toDataURL("image/png");
-            const imgW    = W - MAR*2;
-            const imgH    = imgW * (fixH / fixW);
+            const imgData = canvas.toDataURL("image/png");
+            const imgW = W - MAR*2;
+            const imgH = imgW * (fixedH / fixedW);
 
+            // Check if need new page
             if (y + imgH + 20 > 280) { doc.addPage(); y = 18; }
 
+            // Section label
             doc.setFillColor(...LGRAY);
             doc.roundedRect(MAR, y, W - MAR*2, 8, 2, 2, "F");
             doc.setTextColor(...MUTED);
             doc.setFont("helvetica", "bold");
             doc.setFontSize(7);
-            doc.text(`PLANO DE CORTE — ROLLO ${r.rollWidth} m`, MAR+4, y+5.5);
+            doc.text(`PLANO DE CORTE — ROLLO ${r.rollWidth} m`, MAR + 4, y + 5.5);
             y += 10;
 
             doc.addImage(imgData, "PNG", MAR, y, imgW, imgH);
             y += imgH + 10;
             resolve();
           };
-          img.onerror = () => { URL.revokeObjectURL(url); resolve(); };
           img.src = url;
         });
       }
       document.body.removeChild(tmpDiv);
     }
 
-    // ── Warnings ──
+    // ── Empate warnings ──
     const warnEntries = Object.values(warnMap || {});
     if (warnEntries.length) {
       if (y + warnEntries.length * 10 + 16 > 280) { doc.addPage(); y = 18; }
       doc.setFillColor(255, 243, 205);
-      doc.roundedRect(MAR, y, W-MAR*2, warnEntries.length*10+12, 3, 3, "F");
+      doc.roundedRect(MAR, y, W - MAR*2, warnEntries.length * 10 + 12, 3, 3, "F");
       doc.setDrawColor(253, 211, 77);
-      doc.roundedRect(MAR, y, W-MAR*2, warnEntries.length*10+12, 3, 3, "S");
+      doc.roundedRect(MAR, y, W - MAR*2, warnEntries.length * 10 + 12, 3, 3, "S");
       y += 8;
       warnEntries.forEach(({ ow, oh, qty, rollos }) => {
-        const all      = rollos.length === allResults.length;
-        const rolStr   = rollos.map(rw => `${rw} m`).join(" y ");
-        const enRollos = all ? "en ambos anchos" : `solo en rollo ${rolStr}`;
+        const totalRolls  = allResults.length;
+        const affectedAll = rollos.length === totalRolls;
+        const rollosStr   = rollos.map(rw => `${rw} m`).join(" y ");
+        const enRollos    = affectedAll ? "en ambos anchos" : `solo en rollo ${rollosStr}`;
         doc.setTextColor(146, 64, 14);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
-        doc.text(`⚠  ${ow}×${oh} m, cant. ${qty} — requiere empate ${enRollos}. Calcular manualmente.`, MAR+4, y);
+        doc.text(`⚠  ${ow} × ${oh} m, cant. ${qty} — requiere empate ${enRollos}. Calcular manualmente.`, MAR + 4, y);
         y += 10;
       });
+      y += 6;
     }
 
     // ── Footer ──
-    const pages = doc.getNumberOfPages();
-    for (let i = 1; i <= pages; i++) {
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       doc.setFillColor(...LGRAY);
       doc.rect(0, 287, W, 10, "F");
@@ -1658,55 +1546,61 @@ async function _doPDF(identity) {
       doc.setFontSize(7);
       doc.setFont("helvetica", "normal");
       doc.text("Spectra · Optimizador Arquitectónico", MAR, 293);
-      doc.text(`Página ${i} de ${pages}`, W-MAR, 293, { align: "right" });
+      doc.text(`Página ${i} de ${pageCount}`, W - MAR, 293, { align: "right" });
     }
 
-    // ── Descargar PDF ──
-    const fileName  = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
+    // ── Download PDF locally ──
+    const fileName = `cotizacion_spectra_${now.toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
 
-    // ── Enviar a Make (Gmail + Kommo) ──
-    btn.textContent = "Enviando...";
+    // ── Get base64 and send to Make ──
     const pdfBase64 = doc.output("datauristring").split(",")[1];
-    await _sendByEmail(identity, pieces, allResults, origArea, pdfBase64, fileName);
 
-    btn.disabled    = false;
+    btn.textContent = "Guardando en Airtable...";
+    await sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea);
+
+    btn.disabled = false;
     btn.textContent = "⬇ Guardar";
-    status.style.color  = "var(--accent)";
-    status.textContent  = "✓ PDF descargado y correo enviado";
-    setTimeout(() => { status.textContent = ""; }, 5000);
+    status.style.color = "var(--accent)";
+    status.textContent = "✓ PDF descargado y guardado en Airtable";
+    setTimeout(() => { status.textContent = ""; }, 4000);
 
   } catch (err) {
-    console.error("PDF error:", err);
-    btn.disabled    = false;
+    console.error(err);
+    btn.disabled = false;
     btn.textContent = "⬇ Guardar";
     status.style.color = "#dc2626";
-    status.textContent = "Error al generar el PDF — revisa la consola.";
+    status.textContent = "Error al generar el PDF. Revisa la consola.";
   }
 }
 
-async function _sendByEmail(identity, pieces, allResults, origArea, pdfBase64, fileName) {
-  emailjs.init("7V1ujfth_HCXoiOqC");
+async function sendPDFToAirtable(pdfBase64, fileName, pieces, allResults, origArea) {
+  const webhookUrl = "https://hook.us2.make.com/b45r4e43quv8orbnpfzl9vhuxhiw6mxv";
+  if (!webhookUrl || webhookUrl === "TU_WEBHOOK_URL_DE_MAKE") return;
 
-  const r152  = allResults.find(r => r.rollWidth === 1.52);
-  const r182  = allResults.find(r => r.rollWidth === 1.82);
-  const warns = [...new Set(allResults.flatMap(r => r.warnings || []))];
+  const r152 = allResults.find(r => r.rollWidth === 1.52);
+  const r182 = allResults.find(r => r.rollWidth === 1.82);
+  const warnings = [...new Set(allResults.flatMap(r => r.warnings || []))];
 
-  const params = {
-    nombre:        identity.nombre,
-    cedula:        identity.cedula || "—",
-    fecha:         new Date().toLocaleDateString("es-CO", { day:"2-digit", month:"short", year:"numeric" }) + " " +
-                   new Date().toLocaleTimeString("es-CO", { hour:"2-digit", minute:"2-digit" }),
-    medidas:       pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
-    metros_152:    r152 ? r152.linearMeters.toFixed(2) + " m" : "—",
-    metros_182:    r182 ? r182.linearMeters.toFixed(2) + " m" : "—",
-    area_total_m2: origArea.toFixed(3) + " m²",
-    advertencias:  warns.join(" | ") || "Ninguna"
+  const payload = {
+    fecha:          new Date().toISOString(),
+    nombre_archivo: fileName,
+    nombre:         identity ? identity.nombre : "",
+    cedula:         identity ? identity.cedula  : "",
+    medidas:        pieces.map(p => `${p.width}×${p.height} m (×${p.amount})`).join(", "),
+    metros_152:     r152 ? parseFloat(r152.linearMeters.toFixed(2)) : null,
+    metros_182:     r182 ? parseFloat(r182.linearMeters.toFixed(2)) : null,
+    area_total_m2:  parseFloat(origArea.toFixed(3)),
+    advertencias:   warnings.join(" | ") || "",
+    pdf_base64:     pdfBase64
   };
 
-  await emailjs.send("service_cy97ghc", "template_verusni", params);
+  await fetch(webhookUrl, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(payload)
+  });
 }
-
 
 document.getElementById("addRoll").addEventListener("click",  () => addRollRow());
 document.getElementById("addCut").addEventListener("click",   () => addCutRow());
