@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -572,6 +571,86 @@ function fmtMoney(v) {
   return new Intl.NumberFormat("es-CO", {
     style: "currency", currency: "COP", maximumFractionDigits: 0
   }).format(v || 0);
+}
+
+
+
+function _showIdentityModal() {
+  const modal = document.getElementById("identityModal");
+  if (!modal) return;
+
+  try {
+    const saved = JSON.parse(localStorage.getItem("spectra_identity") || "null");
+    if (saved) {
+      document.getElementById("idNombre").value = saved.nombre || "";
+      document.getElementById("idCedula").value = saved.cedula || "";
+      document.getElementById("idTelefono").value = saved.telefono || "";
+    }
+  } catch (e) {}
+
+  modal.classList.add("active");
+  const first = document.getElementById("idNombre");
+  if (first) first.focus();
+}
+
+function _hideIdentityModal() {
+  const modal = document.getElementById("identityModal");
+  if (modal) modal.classList.remove("active");
+}
+
+function _readIdentityModal() {
+  return {
+    nombre: (document.getElementById("idNombre")?.value || "").trim(),
+    cedula: (document.getElementById("idCedula")?.value || "").trim(),
+    telefono: (document.getElementById("idTelefono")?.value || "").trim()
+  };
+}
+
+function _onSave() {
+  _showIdentityModal();
+}
+
+const _identityModal = document.getElementById("identityModal");
+const _idCancel = document.getElementById("idCancel");
+const _idSave = document.getElementById("idSave");
+
+if (_idCancel) {
+  _idCancel.addEventListener("click", _hideIdentityModal);
+}
+
+if (_identityModal) {
+  _identityModal.addEventListener("click", (e) => {
+    if (e.target === _identityModal) _hideIdentityModal();
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") _hideIdentityModal();
+});
+
+if (_idSave) {
+  _idSave.addEventListener("click", async () => {
+    const identity = _readIdentityModal();
+
+    if (!identity.nombre) {
+      alert("Ingresa el nombre.");
+      document.getElementById("idNombre")?.focus();
+      return;
+    }
+
+    if (!identity.cedula) {
+      alert("Ingresa la cédula.");
+      document.getElementById("idCedula")?.focus();
+      return;
+    }
+
+    try {
+      localStorage.setItem("spectra_identity", JSON.stringify(identity));
+    } catch (e) {}
+
+    _hideIdentityModal();
+    await generateAndSendPDF(identity);
+  });
 }
 
 // ─── EXPAND PIECES ──────────────────────────────────────────────────────────
